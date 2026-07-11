@@ -1,0 +1,82 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments (development runs in Docker)
+.venv/
+venv/
+env/
+ENV/
+.tox/
+.nox/
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+MANIFEST
+
+# Test, coverage, and static-analysis output
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+pytest-*.xml
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Tool and framework caches
+.cache/
+.pytest_cache/
+
+# Local databases, dumps, and generated data
+*.db
+*.sqlite
+*.sqlite3
+*.sql.gz
+*.dump
+*.bak
+data/
+tmp/
+*.log
+
+# Docker local state and generated overrides
+docker-compose.override.yml
+compose.override.yaml
+docker-compose.override.yaml
+
+# IDE/editor metadata
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Generated documentation and reports
+site/
+docs/_build/
+reports/
