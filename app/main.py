@@ -21,6 +21,7 @@ from app.services import (
     ForbiddenError,
     InactiveGameError,
     InactivePlayerError,
+    InvalidAnalyticsRangeError,
     InvalidPlayError,
     InvalidTransitionError,
     NotFoundError,
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             InvalidTransitionError: status.HTTP_409_CONFLICT,
             SessionExpiredError: status.HTTP_409_CONFLICT,
             InvalidPlayError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+            InvalidAnalyticsRangeError: status.HTTP_422_UNPROCESSABLE_CONTENT,
             RewardUnavailableError: status.HTTP_409_CONFLICT,
         }.get(type(error), status.HTTP_400_BAD_REQUEST)
         return JSONResponse(status_code=status_code, content={"error": {"code": error.code}})

@@ -68,6 +68,10 @@ class RewardUnavailableError(DomainError):
     code = "reward_unavailable"
 
 
+class InvalidAnalyticsRangeError(DomainError):
+    code = "invalid_analytics_range"
+
+
 async def create_player(session: AsyncSession, display_name: str) -> Player:
     player = await repositories.add_player(session, display_name)
     await session.commit()
@@ -174,6 +178,7 @@ async def create_session(
         challenge=challenge,
     )
     await repositories.add_session_audit(session, game_session)
+    await repositories.add_session_started_event(session, game_session, game_key=game.key)
     await session.commit()
     return game_session
 
@@ -346,7 +351,12 @@ async def play_session(
     game_session.status = SessionStatus.COMPLETED
     game_session.ended_at = now
     await repositories.add_outcome_audit(session, outcome, player_id=owner_id, game_key=game.key)
-    await repositories.add_reward_evidence(session, reward, event_type="reward_issued")
+    await repositories.add_game_played_event(
+        session, outcome, player_id=owner_id, game_key=game.key
+    )
+    await repositories.add_reward_evidence(
+        session, reward, event_type="reward_issued", game_key=game.key
+    )
     await session.commit()
     return outcome
 
@@ -370,7 +380,12 @@ async def claim_session_reward(
         raise ForbiddenError
     changed = claim_reward(reward, clock())
     if changed:
-        await repositories.add_reward_evidence(session, reward, event_type="reward_claimed")
+        game_key = await repositories.game_key_for_reward(session, reward.id)
+        if game_key is None:
+            raise NotFoundError
+        await repositories.add_reward_evidence(
+            session, reward, event_type="reward_claimed", game_key=game_key
+        )
     await session.commit()
     return reward
 
@@ -383,6 +398,31 @@ async def player_rewards(
     if await repositories.get_player(session, player_id) is None:
         raise NotFoundError
     return await repositories.list_player_rewards(session, player_id, limit, offset)
+
+
+def validate_analytics_range(start_at: datetime | None, end_at: datetime | None) -> None:
+    """Require aware timestamps and a non-empty [start, end) interval."""
+    for boundary in (start_at, end_at):
+        if boundary is not None and boundary.utcoffset() is None:
+            raise InvalidAnalyticsRangeError
+    if start_at is not None and end_at is not None and start_at >= end_at:
+        raise InvalidAnalyticsRangeError
+
+
+async def analytics_game_summary(
+    session: AsyncSession,
+    *,
+    owner_id: uuid.UUID,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    game_key: str | None,
+) -> list[repositories.GameSummaryRow]:
+    validate_analytics_range(start_at, end_at)
+    if await repositories.get_player(session, owner_id) is None:
+        raise NotFoundError
+    return await repositories.game_summary(
+        session, player_id=owner_id, start_at=start_at, end_at=end_at, game_key=game_key
+    )
 
 
 async def retrieve_outcome_audit(

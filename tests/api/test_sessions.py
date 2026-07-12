@@ -101,6 +101,23 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
                 f"/api/v1/players/{player_id}/rewards",
                 headers={"X-Player-ID": str(player_id)},
             )
+            summary = await client.get(
+                "/api/v1/analytics/game-summary?game_key=skill_check",
+                headers={"X-Player-ID": str(player_id)},
+            )
+            empty_summary = await client.get(
+                "/api/v1/analytics/game-summary?start_at=2099-01-01T00:00:00Z",
+                headers={"X-Player-ID": str(player_id)},
+            )
+            invalid_range = await client.get(
+                "/api/v1/analytics/game-summary"
+                "?start_at=2026-01-02T00:00:00Z&end_at=2026-01-01T00:00:00Z",
+                headers={"X-Player-ID": str(player_id)},
+            )
+            unknown_owner = await client.get(
+                "/api/v1/analytics/game-summary",
+                headers={"X-Player-ID": str(uuid4())},
+            )
             audit = await client.get(
                 f"/api/v1/audit/outcomes/{played.json()['id']}",
                 headers={"X-Player-ID": str(player_id)},
@@ -124,5 +141,17 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
         assert rewards.json()["items"] == [claimed.json()]
         assert audit.status_code == 200
         assert audit.json()["evidence"]["session_id"] == created.json()["id"]
+        assert summary.status_code == 200
+        assert summary.json()["items"] == [
+            {
+                "game_key": "skill_check",
+                "plays": 1,
+                "rewards_issued": 1,
+                "average_reward_value": 1000.0,
+            }
+        ]
+        assert empty_summary.json()["items"] == []
+        assert invalid_range.status_code == 422
+        assert unknown_owner.status_code == 404
     finally:
         await database.dispose()

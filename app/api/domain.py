@@ -1,5 +1,6 @@
 """Player and catalogue HTTP adapters."""
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -14,6 +15,8 @@ from app.schemas import (
     GameConfigResponse,
     GameListResponse,
     GameResponse,
+    GameSummaryItem,
+    GameSummaryResponse,
     OutcomeAuditResponse,
     OutcomeResponse,
     PlayerCreate,
@@ -158,3 +161,32 @@ async def get_outcome_audit(
 ) -> OutcomeAuditResponse:
     outcome, evidence = await services.retrieve_outcome_audit(session, outcome_id, owner_id)
     return OutcomeAuditResponse(outcome=OutcomeResponse.model_validate(outcome), evidence=evidence)
+
+
+@router.get("/analytics/game-summary", response_model=GameSummaryResponse)
+async def get_game_summary(
+    session: Session,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    start_at: Annotated[datetime | None, Query()] = None,
+    end_at: Annotated[datetime | None, Query()] = None,
+    game_key: Annotated[
+        str | None, Query(min_length=1, max_length=40, pattern=r"^[a-z0-9_]+$")
+    ] = None,
+) -> GameSummaryResponse:
+    rows = await services.analytics_game_summary(
+        session, owner_id=owner_id, start_at=start_at, end_at=end_at, game_key=game_key
+    )
+    return GameSummaryResponse(
+        items=[
+            GameSummaryItem(
+                game_key=row.game_key,
+                plays=row.plays,
+                rewards_issued=row.rewards_issued,
+                average_reward_value=row.average_reward_value,
+            )
+            for row in rows
+        ],
+        start_at=start_at,
+        end_at=end_at,
+        game_key=game_key,
+    )

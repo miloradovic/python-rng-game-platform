@@ -185,3 +185,19 @@ class RewardListResponse(BaseModel):
     items: list[RewardResponse]
     limit: int
     offset: int
+
+
+class GameSummaryItem(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    game_key: str
+    plays: int
+    rewards_issued: int
+    average_reward_value: float | None
+
+
+class GameSummaryResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    items: list[GameSummaryItem]
+    start_at: datetime | None
+    end_at: datetime | None
+    game_key: str | None
