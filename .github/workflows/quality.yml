@@ -23,6 +23,11 @@ jobs:
           docker compose run --rm app alembic upgrade head
           docker compose run --rm app alembic current
 
+      - name: Validate empty-schema migration downgrade and restoration
+        run: |
+          docker compose run --rm app alembic downgrade base
+          docker compose run --rm app alembic upgrade head
+
       - name: Verify formatting
         run: docker compose run --rm app ruff format --check .
 
@@ -34,11 +39,6 @@ jobs:
 
       - name: Test
         run: docker compose run --rm app pytest
-
-      - name: Validate migration downgrade and restoration
-        run: |
-          docker compose run --rm app alembic downgrade base
-          docker compose run --rm app alembic upgrade head
 
       - name: Show service logs after failure
         if: failure()

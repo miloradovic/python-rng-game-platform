@@ -123,10 +123,12 @@ by game key and empty filters return an empty `items` list.
 
 ## Migrations and data
 
-Alembic is the only schema-change mechanism. Revisions `0001` through `0006` establish the
-foundation, catalogue, lifecycle, gameplay, rewards, and analytics. Revision `0006` idempotently
-backfills durable analytics events from authoritative historical rows. Its downgrade removes the
-query index but deliberately preserves append-only evidence.
+Alembic is the only schema-change mechanism. Revisions `0001` through `0008` establish the
+foundation, catalogue, lifecycle, gameplay, rewards, analytics, and additive fairness-proof
+persistence. Revisions `0007` and `0008` add isolated seed custody, proof evidence, append-only
+hash-chain events, and forward-only proof lifecycle protection; they do not backfill earlier
+outcomes as provably fair. Revision `0007` refuses to downgrade while proof evidence exists,
+preserving finalized audit data.
 
 `python -m tools.seed` is explicit and repeatable. Application startup and migrations do not
 silently create catalogue rows.
