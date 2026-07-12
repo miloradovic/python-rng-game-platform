@@ -1,0 +1,72 @@
+"""HTTP contracts for server-created sessions and ownership."""
+
+from collections.abc import AsyncIterator
+from uuid import uuid4
+
+import httpx
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.database import Database, get_session
+from app.main import create_app
+from app.models import Player
+from tools.seed import seed_catalogue
+
+pytestmark = pytest.mark.api
+
+
+async def test_create_session_binds_server_config_and_enforces_owner() -> None:
+    database = Database(get_settings())
+    player_id = uuid4()
+    try:
+        async with database.session_factory.begin() as session:
+            await seed_catalogue(session)
+            session.add(Player(id=player_id, display_name="API Session Test"))
+
+        application = create_app(get_settings())
+
+        async def override_session() -> AsyncIterator[AsyncSession]:
+            async with database.session_factory() as session:
+                yield session
+
+        application.dependency_overrides[get_session] = override_session
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application), base_url="http://test"
+        ) as client:
+            forbidden = await client.post(
+                "/api/v1/sessions",
+                headers={"X-Player-ID": str(uuid4())},
+                json={
+                    "request_id": str(uuid4()),
+                    "player_id": str(player_id),
+                    "game_key": "skill_check",
+                },
+            )
+            request_id = uuid4()
+            created = await client.post(
+                "/api/v1/sessions",
+                headers={"X-Player-ID": str(player_id)},
+                json={
+                    "request_id": str(request_id),
+                    "player_id": str(player_id),
+                    "game_key": "skill_check",
+                },
+            )
+            retried = await client.post(
+                "/api/v1/sessions",
+                headers={"X-Player-ID": str(player_id)},
+                json={
+                    "request_id": str(request_id),
+                    "player_id": str(player_id),
+                    "game_key": "skill_check",
+                },
+            )
+
+        assert forbidden.status_code == 403
+        assert forbidden.json() == {"error": {"code": "forbidden"}}
+        assert created.status_code == 201
+        assert created.json()["config_version_id"]
+        assert retried.json()["id"] == created.json()["id"]
+    finally:
+        await database.dispose()

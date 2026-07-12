@@ -82,10 +82,12 @@ class GameSession(Timestamped, Base):
     player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id", ondelete="RESTRICT"))
     game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
     config_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("game_config_versions.id"))
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     status: Mapped[SessionStatus] = mapped_column(
         Enum(SessionStatus, name="session_status", values_callable=lambda e: [x.value for x in e])
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Outcome(Timestamped, Base):

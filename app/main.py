@@ -13,7 +13,16 @@ from app.cache import create_redis_client, redis_is_available
 from app.config import Settings, get_settings
 from app.database import Database
 from app.logging import configure_logging
-from app.services import DomainError, ForbiddenError, InactiveGameError, NotFoundError
+from app.services import (
+    ActiveSessionError,
+    CooldownError,
+    DomainError,
+    ForbiddenError,
+    InactiveGameError,
+    InactivePlayerError,
+    InvalidTransitionError,
+    NotFoundError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +69,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             NotFoundError: status.HTTP_404_NOT_FOUND,
             ForbiddenError: status.HTTP_403_FORBIDDEN,
             InactiveGameError: status.HTTP_409_CONFLICT,
+            InactivePlayerError: status.HTTP_409_CONFLICT,
+            CooldownError: status.HTTP_409_CONFLICT,
+            ActiveSessionError: status.HTTP_409_CONFLICT,
+            InvalidTransitionError: status.HTTP_409_CONFLICT,
         }.get(type(error), status.HTTP_400_BAD_REQUEST)
         return JSONResponse(status_code=status_code, content={"error": {"code": error.code}})
 

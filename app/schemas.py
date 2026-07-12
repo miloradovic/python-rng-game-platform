@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from app.models import ConfigStatus, PlayerStatus
+from app.models import ConfigStatus, PlayerStatus, SessionStatus
 
 
 class ServiceAvailability(StrEnum):
@@ -44,7 +44,7 @@ class ApiInfoResponse(BaseModel):
 
 class PlayerCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    display_name: Annotated[str, Field(min_length=2, max_length=50, pattern=r"^[\w .''-]+$")]
+    display_name: Annotated[str, Field(min_length=2, max_length=50, pattern=r"^[\w .'-]+$")]
 
 
 class PlayerResponse(BaseModel):
@@ -114,3 +114,25 @@ class GameListResponse(BaseModel):
     items: list[GameResponse]
     limit: int
     offset: int
+
+
+class SessionCreate(BaseModel):
+    """Intent-only session creation request."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    request_id: UUID
+    player_id: UUID
+    game_key: Annotated[str, Field(min_length=1, max_length=40)]
+
+
+class SessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, frozen=True)
+    id: UUID
+    request_id: UUID
+    player_id: UUID
+    game_id: UUID
+    config_version_id: UUID
+    status: SessionStatus
+    created_at: datetime
+    expires_at: datetime
+    ended_at: datetime | None
