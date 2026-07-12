@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from app.models import ConfigStatus, PlayerStatus, SessionStatus
+from app.models import ConfigStatus, PlayerStatus, RewardStatus, SessionStatus
 
 
 class ServiceAvailability(StrEnum):
@@ -161,3 +161,27 @@ class OutcomeAuditResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
     outcome: OutcomeResponse
     evidence: dict[str, Any]
+
+
+class ClaimRequest(BaseModel):
+    """Intent-only claim input; reward fields are server-owned."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class RewardResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, frozen=True)
+    id: UUID
+    outcome_id: UUID
+    player_id: UUID
+    status: RewardStatus
+    value: int
+    created_at: datetime
+    claimed_at: datetime | None
+
+
+class RewardListResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    items: list[RewardResponse]
+    limit: int
+    offset: int

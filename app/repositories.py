@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    AnalyticsEvent,
     AuditRecord,
     ConfigStatus,
     Game,
@@ -15,6 +16,8 @@ from app.models import (
     Outcome,
     OutcomeStatus,
     Player,
+    Reward,
+    RewardStatus,
     SessionStatus,
 )
 
@@ -159,6 +162,70 @@ async def add_outcome(
     await session.flush()
     await session.refresh(outcome)
     return outcome
+
+
+async def add_reward(
+    session: AsyncSession, outcome: Outcome, *, player_id: uuid.UUID, value: int
+) -> Reward:
+    """Issue exactly one durable entitlement for an accepted outcome."""
+    reward = Reward(
+        outcome_id=outcome.id,
+        player_id=player_id,
+        status=RewardStatus.ISSUED,
+        value=value,
+        claimed_at=None,
+    )
+    session.add(reward)
+    await session.flush()
+    await session.refresh(reward)
+    return reward
+
+
+async def lock_reward_by_session(session: AsyncSession, session_id: uuid.UUID) -> Reward | None:
+    reward: Reward | None = await session.scalar(
+        select(Reward)
+        .join(Outcome, Outcome.id == Reward.outcome_id)
+        .where(Outcome.session_id == session_id)
+        .with_for_update()
+    )
+    return reward
+
+
+async def list_player_rewards(
+    session: AsyncSession, player_id: uuid.UUID, limit: int, offset: int
+) -> list[Reward]:
+    rewards = await session.scalars(
+        select(Reward)
+        .where(Reward.player_id == player_id)
+        .order_by(Reward.created_at.desc(), Reward.id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(rewards)
+
+
+async def add_reward_evidence(session: AsyncSession, reward: Reward, *, event_type: str) -> None:
+    """Append audit and uniquely keyed analytics evidence in the business transaction."""
+    evidence = {
+        "reward_id": str(reward.id),
+        "outcome_id": str(reward.outcome_id),
+        "player_id": str(reward.player_id),
+        "value": reward.value,
+        "status": reward.status.value,
+    }
+    session.add(
+        AuditRecord(
+            event_type=event_type, entity_type="reward", entity_id=reward.id, evidence=evidence
+        )
+    )
+    session.add(
+        AnalyticsEvent(
+            event_key=f"{event_type}:{reward.id}",
+            event_type=event_type,
+            player_id=reward.player_id,
+            payload=evidence,
+        )
+    )
 
 
 async def add_outcome_audit(

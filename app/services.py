@@ -14,6 +14,8 @@ from app.models import (
     Outcome,
     Player,
     PlayerStatus,
+    Reward,
+    RewardStatus,
     SessionStatus,
 )
 from app.rng import OutcomeProvider, secure_challenge
@@ -60,6 +62,10 @@ class InvalidPlayError(DomainError):
 
 class SessionExpiredError(DomainError):
     code = "session_expired"
+
+
+class RewardUnavailableError(DomainError):
+    code = "reward_unavailable"
 
 
 async def create_player(session: AsyncSession, display_name: str) -> Player:
@@ -260,6 +266,40 @@ def _skill_result(
     }
 
 
+def reward_value(config: GameConfigVersion, outcome: Outcome) -> int:
+    """Derive an entitlement only from an accepted outcome and its immutable config."""
+    payload = game_config_adapter.validate_python(config.payload)
+    if payload.game_type == "daily_spin":
+        reward_key = outcome.result.get("reward_key")
+        for band in payload.rewards:
+            if band.key == reward_key:
+                return band.value
+        raise InvalidPlayError
+    if payload.game_type == "prediction_card":
+        return payload.correct_reward if outcome.result.get("correct") is True else 0
+    if payload.game_type == "skill_check":
+        score = outcome.result.get("score")
+        if (
+            not isinstance(score, int)
+            or isinstance(score, bool)
+            or not 0 <= score <= payload.max_score
+        ):
+            raise InvalidPlayError
+        return score
+    raise InvalidPlayError
+
+
+def claim_reward(reward: Reward, now: datetime) -> bool:
+    """Apply the issued-to-claimed transition; return false for an idempotent retry."""
+    if reward.status == RewardStatus.CLAIMED:
+        return False
+    if reward.status != RewardStatus.ISSUED:
+        raise RewardUnavailableError
+    reward.status = RewardStatus.CLAIMED
+    reward.claimed_at = now
+    return True
+
+
 async def play_session(
     session: AsyncSession,
     *,
@@ -300,11 +340,49 @@ async def play_session(
     else:
         raise InvalidPlayError
     outcome = await repositories.add_outcome(session, game_session, result)
+    reward = await repositories.add_reward(
+        session, outcome, player_id=owner_id, value=reward_value(config, outcome)
+    )
     game_session.status = SessionStatus.COMPLETED
     game_session.ended_at = now
     await repositories.add_outcome_audit(session, outcome, player_id=owner_id, game_key=game.key)
+    await repositories.add_reward_evidence(session, reward, event_type="reward_issued")
     await session.commit()
     return outcome
+
+
+async def claim_session_reward(
+    session: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    clock: Callable[[], datetime] = utc_now,
+) -> Reward:
+    reward = await repositories.lock_reward_by_session(session, session_id)
+    if reward is None:
+        game_session = await repositories.get_session(session, session_id)
+        if game_session is None:
+            raise NotFoundError
+        if game_session.player_id != owner_id:
+            raise ForbiddenError
+        raise RewardUnavailableError
+    if reward.player_id != owner_id:
+        raise ForbiddenError
+    changed = claim_reward(reward, clock())
+    if changed:
+        await repositories.add_reward_evidence(session, reward, event_type="reward_claimed")
+    await session.commit()
+    return reward
+
+
+async def player_rewards(
+    session: AsyncSession, *, player_id: uuid.UUID, owner_id: uuid.UUID, limit: int, offset: int
+) -> list[Reward]:
+    if player_id != owner_id:
+        raise ForbiddenError
+    if await repositories.get_player(session, player_id) is None:
+        raise NotFoundError
+    return await repositories.list_player_rewards(session, player_id, limit, offset)
 
 
 async def retrieve_outcome_audit(

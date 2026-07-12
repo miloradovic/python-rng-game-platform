@@ -10,6 +10,7 @@ from app import services
 from app.database import get_session as get_database_session
 from app.rng import OutcomeProvider
 from app.schemas import (
+    ClaimRequest,
     GameConfigResponse,
     GameListResponse,
     GameResponse,
@@ -18,6 +19,8 @@ from app.schemas import (
     PlayerCreate,
     PlayerResponse,
     PlayRequest,
+    RewardListResponse,
+    RewardResponse,
     SessionCreate,
     SessionResponse,
 )
@@ -115,6 +118,36 @@ async def play_session(
         provider=provider,
     )
     return OutcomeResponse.model_validate(outcome)
+
+
+@router.post("/sessions/{session_id}/claim", response_model=RewardResponse)
+async def claim_session_reward(
+    session_id: UUID,
+    body: ClaimRequest,
+    session: Session,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+) -> RewardResponse:
+    reward = await services.claim_session_reward(session, session_id=session_id, owner_id=owner_id)
+    del body
+    return RewardResponse.model_validate(reward)
+
+
+@router.get("/players/{player_id}/rewards", response_model=RewardListResponse)
+async def list_player_rewards(
+    player_id: UUID,
+    session: Session,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> RewardListResponse:
+    rewards = await services.player_rewards(
+        session, player_id=player_id, owner_id=owner_id, limit=limit, offset=offset
+    )
+    return RewardListResponse(
+        items=[RewardResponse.model_validate(reward) for reward in rewards],
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/audit/outcomes/{outcome_id}", response_model=OutcomeAuditResponse)

@@ -110,6 +110,8 @@ class Reward(Timestamped, Base):
     )
     value: Mapped[int]
 
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class AuditRecord(Timestamped, Base):
     __tablename__ = "audit_records"

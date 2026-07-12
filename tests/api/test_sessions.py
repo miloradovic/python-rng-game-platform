@@ -77,6 +77,30 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
                 headers={"X-Player-ID": str(player_id)},
                 json={"actions": created.json()["challenge"]["sequence"]},
             )
+            forged_claim = await client.post(
+                f"/api/v1/sessions/{created.json()['id']}/claim",
+                headers={"X-Player-ID": str(player_id)},
+                json={"value": 999999},
+            )
+            wrong_owner_claim = await client.post(
+                f"/api/v1/sessions/{created.json()['id']}/claim",
+                headers={"X-Player-ID": str(uuid4())},
+                json={},
+            )
+            claimed = await client.post(
+                f"/api/v1/sessions/{created.json()['id']}/claim",
+                headers={"X-Player-ID": str(player_id)},
+                json={},
+            )
+            retried_claim = await client.post(
+                f"/api/v1/sessions/{created.json()['id']}/claim",
+                headers={"X-Player-ID": str(player_id)},
+                json={},
+            )
+            rewards = await client.get(
+                f"/api/v1/players/{player_id}/rewards",
+                headers={"X-Player-ID": str(player_id)},
+            )
             audit = await client.get(
                 f"/api/v1/audit/outcomes/{played.json()['id']}",
                 headers={"X-Player-ID": str(player_id)},
@@ -91,6 +115,13 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
         assert played.status_code == 200
         assert played.json()["result"]["score"] == 1000
         assert replayed.status_code == 409
+        assert forged_claim.status_code == 422
+        assert wrong_owner_claim.status_code == 403
+        assert claimed.status_code == 200
+        assert claimed.json()["value"] == 1000
+        assert claimed.json()["status"] == "claimed"
+        assert retried_claim.json() == claimed.json()
+        assert rewards.json()["items"] == [claimed.json()]
         assert audit.status_code == 200
         assert audit.json()["evidence"]["session_id"] == created.json()["id"]
     finally:
