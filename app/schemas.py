@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -136,3 +136,28 @@ class SessionResponse(BaseModel):
     created_at: datetime
     expires_at: datetime
     ended_at: datetime | None
+    challenge: dict[str, Any]
+
+
+class PlayRequest(BaseModel):
+    """Intent-only gameplay input; authoritative fields are forbidden."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    choice: str | None = None
+    actions: Annotated[list[Annotated[int, Field(ge=0, le=9)]], Field(max_length=5)] | None = None
+
+
+class OutcomeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, frozen=True)
+    id: UUID
+    session_id: UUID
+    config_version_id: UUID
+    status: str
+    result: dict[str, Any]
+    created_at: datetime
+
+
+class OutcomeAuditResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    outcome: OutcomeResponse
+    evidence: dict[str, Any]

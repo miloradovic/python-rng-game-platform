@@ -14,6 +14,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rng_app}:${POSTGRES_PASSWORD:-local-password}@db:5432/${POSTGRES_DB:-rng_game_platform}
       REDIS_URL: redis://redis:6379/0
+      OUTCOME_HMAC_SECRET: ${OUTCOME_HMAC_SECRET:-development-only-outcome-key-32-bytes-minimum}
       DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       REDIS_CONNECT_TIMEOUT_SECONDS: ${REDIS_CONNECT_TIMEOUT_SECONDS:-1}
     volumes:

@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_url: SecretStr
     redis_url: SecretStr | None = None
+    outcome_hmac_secret: SecretStr
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     redis_connect_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
 

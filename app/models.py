@@ -88,6 +88,7 @@ class GameSession(Timestamped, Base):
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    challenge: Mapped[dict[str, Any]] = mapped_column(JSON)
 
 
 class Outcome(Timestamped, Base):

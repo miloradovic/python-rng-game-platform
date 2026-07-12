@@ -16,6 +16,7 @@ def test_settings_accept_async_connection_schemes() -> None:
         app_env="test",
         database_url="postgresql+asyncpg://user:password@db:5432/database",
         redis_url="redis://redis:6379/0",
+        outcome_hmac_secret="x" * 32,
     )
 
     assert settings.app_env is AppEnvironment.TEST
@@ -43,3 +44,14 @@ def test_settings_require_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATABASE_URL")
     with pytest.raises(ValidationError, match="database_url"):
         Settings(_env_file=None)
+
+
+def test_settings_require_outcome_hmac_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Player-visible cryptographic outcomes fail closed without a key."""
+
+    monkeypatch.delenv("OUTCOME_HMAC_SECRET")
+    with pytest.raises(ValidationError, match="outcome_hmac_secret"):
+        Settings(
+            _env_file=None,
+            database_url="postgresql+asyncpg://user:password@db:5432/database",
+        )

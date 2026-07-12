@@ -62,11 +62,36 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
                     "game_key": "skill_check",
                 },
             )
+            forged = await client.post(
+                f"/api/v1/sessions/{created.json()['id']}/play",
+                headers={"X-Player-ID": str(player_id)},
+                json={"score": 1000},
+            )
+            played = await client.post(
+                f"/api/v1/sessions/{created.json()['id']}/play",
+                headers={"X-Player-ID": str(player_id)},
+                json={"actions": created.json()["challenge"]["sequence"]},
+            )
+            replayed = await client.post(
+                f"/api/v1/sessions/{created.json()['id']}/play",
+                headers={"X-Player-ID": str(player_id)},
+                json={"actions": created.json()["challenge"]["sequence"]},
+            )
+            audit = await client.get(
+                f"/api/v1/audit/outcomes/{played.json()['id']}",
+                headers={"X-Player-ID": str(player_id)},
+            )
 
         assert forbidden.status_code == 403
         assert forbidden.json() == {"error": {"code": "forbidden"}}
         assert created.status_code == 201
         assert created.json()["config_version_id"]
         assert retried.json()["id"] == created.json()["id"]
+        assert forged.status_code == 422
+        assert played.status_code == 200
+        assert played.json()["result"]["score"] == 1000
+        assert replayed.status_code == 409
+        assert audit.status_code == 200
+        assert audit.json()["evidence"]["session_id"] == created.json()["id"]
     finally:
         await database.dispose()

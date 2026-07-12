@@ -12,6 +12,8 @@ from app.models import (
     Game,
     GameConfigVersion,
     GameSession,
+    Outcome,
+    OutcomeStatus,
     Player,
     SessionStatus,
 )
@@ -103,6 +105,7 @@ async def add_session(
     game_id: uuid.UUID,
     config_version_id: uuid.UUID,
     expires_at: datetime,
+    challenge: dict[str, object],
 ) -> GameSession:
     game_session = GameSession(
         request_id=request_id,
@@ -112,6 +115,7 @@ async def add_session(
         status=SessionStatus.ACTIVE,
         expires_at=expires_at,
         ended_at=None,
+        challenge=challenge,
     )
     session.add(game_session)
     await session.flush()
@@ -121,6 +125,78 @@ async def add_session(
 
 async def get_session(session: AsyncSession, session_id: uuid.UUID) -> GameSession | None:
     return await session.get(GameSession, session_id)
+
+
+async def lock_session(session: AsyncSession, session_id: uuid.UUID) -> GameSession | None:
+    game_session: GameSession | None = await session.scalar(
+        select(GameSession).where(GameSession.id == session_id).with_for_update()
+    )
+    return game_session
+
+
+async def get_game_by_id(session: AsyncSession, game_id: uuid.UUID) -> Game | None:
+    return await session.get(Game, game_id)
+
+
+async def get_config_by_id(
+    session: AsyncSession, config_version_id: uuid.UUID
+) -> GameConfigVersion | None:
+    return await session.get(GameConfigVersion, config_version_id)
+
+
+async def add_outcome(
+    session: AsyncSession,
+    game_session: GameSession,
+    result: dict[str, object],
+) -> Outcome:
+    outcome = Outcome(
+        session_id=game_session.id,
+        config_version_id=game_session.config_version_id,
+        status=OutcomeStatus.ACCEPTED,
+        result=result,
+    )
+    session.add(outcome)
+    await session.flush()
+    await session.refresh(outcome)
+    return outcome
+
+
+async def add_outcome_audit(
+    session: AsyncSession,
+    outcome: Outcome,
+    *,
+    player_id: uuid.UUID,
+    game_key: str,
+) -> None:
+    session.add(
+        AuditRecord(
+            event_type="outcome_accepted",
+            entity_type="outcome",
+            entity_id=outcome.id,
+            evidence={
+                "session_id": str(outcome.session_id),
+                "player_id": str(player_id),
+                "game_key": game_key,
+                "config_version_id": str(outcome.config_version_id),
+                "result": outcome.result,
+            },
+        )
+    )
+
+
+async def get_outcome(session: AsyncSession, outcome_id: uuid.UUID) -> Outcome | None:
+    return await session.get(Outcome, outcome_id)
+
+
+async def get_outcome_audit(session: AsyncSession, outcome_id: uuid.UUID) -> AuditRecord | None:
+    audit: AuditRecord | None = await session.scalar(
+        select(AuditRecord).where(
+            AuditRecord.entity_type == "outcome",
+            AuditRecord.entity_id == outcome_id,
+            AuditRecord.event_type == "outcome_accepted",
+        )
+    )
+    return audit
 
 
 async def add_session_audit(session: AsyncSession, game_session: GameSession) -> None:

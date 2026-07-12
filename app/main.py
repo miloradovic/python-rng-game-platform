@@ -13,6 +13,7 @@ from app.cache import create_redis_client, redis_is_available
 from app.config import Settings, get_settings
 from app.database import Database
 from app.logging import configure_logging
+from app.rng import HmacOutcomeProvider
 from app.services import (
     ActiveSessionError,
     CooldownError,
@@ -20,8 +21,10 @@ from app.services import (
     ForbiddenError,
     InactiveGameError,
     InactivePlayerError,
+    InvalidPlayError,
     InvalidTransitionError,
     NotFoundError,
+    SessionExpiredError,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +64,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = resolved_settings
+    application.state.outcome_provider = HmacOutcomeProvider(
+        resolved_settings.outcome_hmac_secret.get_secret_value()
+    )
 
     @application.exception_handler(DomainError)
     async def domain_error_handler(request: Request, error: DomainError) -> JSONResponse:
@@ -73,6 +79,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CooldownError: status.HTTP_409_CONFLICT,
             ActiveSessionError: status.HTTP_409_CONFLICT,
             InvalidTransitionError: status.HTTP_409_CONFLICT,
+            SessionExpiredError: status.HTTP_409_CONFLICT,
+            InvalidPlayError: status.HTTP_422_UNPROCESSABLE_CONTENT,
         }.get(type(error), status.HTTP_400_BAD_REQUEST)
         return JSONResponse(status_code=status_code, content={"error": {"code": error.code}})
 

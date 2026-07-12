@@ -14,4 +14,5 @@ def settings() -> Settings:
         app_env="test",
         database_url="postgresql+asyncpg://test:test@db:5432/test",
         redis_url=None,
+        outcome_hmac_secret="x" * 32,
     )

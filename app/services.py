@@ -11,10 +11,12 @@ from app.models import (
     Game,
     GameConfigVersion,
     GameSession,
+    Outcome,
     Player,
     PlayerStatus,
     SessionStatus,
 )
+from app.rng import OutcomeProvider, secure_challenge
 from app.schemas import game_config_adapter
 
 
@@ -50,6 +52,14 @@ class ActiveSessionError(DomainError):
 
 class InvalidTransitionError(DomainError):
     code = "invalid_transition"
+
+
+class InvalidPlayError(DomainError):
+    code = "invalid_play"
+
+
+class SessionExpiredError(DomainError):
+    code = "session_expired"
 
 
 async def create_player(session: AsyncSession, display_name: str) -> Player:
@@ -145,6 +155,9 @@ async def create_session(
     if latest is not None and latest.created_at + timedelta(seconds=payload.cooldown_seconds) > now:
         raise CooldownError
     duration = getattr(payload, "duration_seconds", 300)
+    challenge: dict[str, object] = {}
+    if game.key == "skill_check":
+        challenge = {"sequence": secure_challenge()}
     game_session = await repositories.add_session(
         session,
         request_id=request_id,
@@ -152,10 +165,163 @@ async def create_session(
         game_id=game.id,
         config_version_id=config.id,
         expires_at=now + timedelta(seconds=duration),
+        challenge=challenge,
     )
     await repositories.add_session_audit(session, game_session)
     await session.commit()
     return game_session
+
+
+def _daily_spin_result(
+    game_session: GameSession,
+    game_key: str,
+    config: GameConfigVersion,
+    provider: OutcomeProvider,
+) -> dict[str, object]:
+    payload = game_config_adapter.validate_python(config.payload)
+    if payload.game_type != "daily_spin":
+        raise InvalidPlayError
+    total_weight = sum(reward.weight for reward in payload.rewards)
+    derived = provider.uniform(
+        session_id=game_session.id,
+        game_key=game_key,
+        config_version_id=config.id,
+        purpose="daily_spin",
+        upper_bound=total_weight,
+    )
+    cursor = derived.value
+    selected = payload.rewards[-1]
+    for reward in payload.rewards:
+        if cursor < reward.weight:
+            selected = reward
+            break
+        cursor -= reward.weight
+    return {
+        "reward_key": selected.key,
+        "normalized_value": derived.value,
+        "derivation_digest": derived.digest_hex,
+    }
+
+
+def _prediction_result(
+    game_session: GameSession,
+    game_key: str,
+    config: GameConfigVersion,
+    provider: OutcomeProvider,
+    choice: str | None,
+) -> dict[str, object]:
+    payload = game_config_adapter.validate_python(config.payload)
+    if payload.game_type != "prediction_card" or choice not in payload.choices:
+        raise InvalidPlayError
+    derived = provider.uniform(
+        session_id=game_session.id,
+        game_key=game_key,
+        config_version_id=config.id,
+        purpose="prediction_card",
+        upper_bound=len(payload.choices),
+    )
+    authoritative_choice = payload.choices[derived.value]
+    return {
+        "player_choice": choice,
+        "authoritative_choice": authoritative_choice,
+        "correct": choice == authoritative_choice,
+        "normalized_value": derived.value,
+        "derivation_digest": derived.digest_hex,
+    }
+
+
+def _skill_result(
+    game_session: GameSession,
+    config: GameConfigVersion,
+    actions: list[int] | None,
+    now: datetime,
+) -> dict[str, object]:
+    payload = game_config_adapter.validate_python(config.payload)
+    challenge = game_session.challenge.get("sequence")
+    if (
+        payload.game_type != "skill_check"
+        or actions is None
+        or not isinstance(challenge, list)
+        or len(actions) != len(set(actions))
+    ):
+        raise InvalidPlayError
+    correct_prefix = 0
+    for submitted, expected in zip(actions, challenge, strict=False):
+        if submitted != expected:
+            break
+        correct_prefix += 1
+    score = (payload.max_score * correct_prefix) // len(challenge)
+    elapsed_ms = max(0, int((now - game_session.created_at).total_seconds() * 1000))
+    return {
+        "score": score,
+        "correct_actions": correct_prefix,
+        "submitted_actions": len(actions),
+        "elapsed_ms": elapsed_ms,
+    }
+
+
+async def play_session(
+    session: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    choice: str | None,
+    actions: list[int] | None,
+    provider: OutcomeProvider,
+    clock: Callable[[], datetime] = utc_now,
+) -> Outcome:
+    game_session = await repositories.lock_session(session, session_id)
+    if game_session is None:
+        raise NotFoundError
+    if game_session.player_id != owner_id:
+        raise ForbiddenError
+    now = clock()
+    if expire_if_due(game_session, now):
+        await session.commit()
+        raise SessionExpiredError
+    if game_session.status != SessionStatus.ACTIVE:
+        raise InvalidTransitionError
+    game = await repositories.get_game_by_id(session, game_session.game_id)
+    config = await repositories.get_config_by_id(session, game_session.config_version_id)
+    if game is None or config is None or config.game_id != game.id:
+        raise NotFoundError
+    if game.key == "daily_spin":
+        if choice is not None or actions is not None:
+            raise InvalidPlayError
+        result = _daily_spin_result(game_session, game.key, config, provider)
+    elif game.key == "prediction_card":
+        if actions is not None:
+            raise InvalidPlayError
+        result = _prediction_result(game_session, game.key, config, provider, choice)
+    elif game.key == "skill_check":
+        if choice is not None:
+            raise InvalidPlayError
+        result = _skill_result(game_session, config, actions, now)
+    else:
+        raise InvalidPlayError
+    outcome = await repositories.add_outcome(session, game_session, result)
+    game_session.status = SessionStatus.COMPLETED
+    game_session.ended_at = now
+    await repositories.add_outcome_audit(session, outcome, player_id=owner_id, game_key=game.key)
+    await session.commit()
+    return outcome
+
+
+async def retrieve_outcome_audit(
+    session: AsyncSession, outcome_id: uuid.UUID, owner_id: uuid.UUID
+) -> tuple[Outcome, dict[str, object]]:
+    outcome = await repositories.get_outcome(session, outcome_id)
+    if outcome is None:
+        raise NotFoundError
+    game_session = await repositories.get_session(session, outcome.session_id)
+    if game_session is None:
+        raise NotFoundError
+    if game_session.player_id != owner_id:
+        raise ForbiddenError
+    audit = await repositories.get_outcome_audit(session, outcome_id)
+    if audit is None:
+        raise NotFoundError
+    return outcome, audit.evidence
 
 
 async def retrieve_session(
