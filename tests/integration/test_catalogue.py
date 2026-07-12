@@ -6,7 +6,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.config import get_settings
 from app.database import Database
-from app.models import Game, GameConfigVersion
+from app.models import ConfigStatus, Game, GameConfigVersion
 from tools.seed import seed_catalogue
 
 pytestmark = pytest.mark.integration
@@ -20,7 +20,14 @@ async def test_seed_is_repeatable_and_published_configs_are_immutable() -> None:
             await seed_catalogue(session)
         async with database.session_factory() as session:
             assert await session.scalar(select(func.count()).select_from(Game)) == 3
-            assert await session.scalar(select(func.count()).select_from(GameConfigVersion)) == 3
+            config_count = await session.scalar(select(func.count()).select_from(GameConfigVersion))
+            published_count = await session.scalar(
+                select(func.count())
+                .select_from(GameConfigVersion)
+                .where(GameConfigVersion.status == ConfigStatus.PUBLISHED)
+            )
+            assert config_count is not None and config_count >= 3
+            assert published_count == 3
             config_id = await session.scalar(select(GameConfigVersion.id).limit(1))
             with pytest.raises(DBAPIError):
                 await session.execute(

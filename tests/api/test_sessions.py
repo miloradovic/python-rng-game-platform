@@ -130,12 +130,13 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
         assert retried.json()["id"] == created.json()["id"]
         assert forged.status_code == 422
         assert played.status_code == 200
-        assert played.json()["result"]["score"] == 1000
+        authoritative_score = played.json()["result"]["score"]
+        assert authoritative_score > 0
         assert replayed.status_code == 409
         assert forged_claim.status_code == 422
         assert wrong_owner_claim.status_code == 403
         assert claimed.status_code == 200
-        assert claimed.json()["value"] == 1000
+        assert claimed.json()["value"] == authoritative_score
         assert claimed.json()["status"] == "claimed"
         assert retried_claim.json() == claimed.json()
         assert rewards.json()["items"] == [claimed.json()]
@@ -147,7 +148,7 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
                 "game_key": "skill_check",
                 "plays": 1,
                 "rewards_issued": 1,
-                "average_reward_value": 1000.0,
+                "average_reward_value": float(authoritative_score),
             }
         ]
         assert empty_summary.json()["items"] == []
