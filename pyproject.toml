@@ -1,0 +1,82 @@
+[project]
+name = "python-rng-game-platform"
+version = "0.1.0"
+description = "Server-authoritative free-to-play game platform"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "alembic==1.18.5",
+    "asyncpg==0.31.0",
+    "fastapi==0.139.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "redis==8.0.1",
+    "sqlalchemy==2.0.51",
+    "uvicorn==0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==2.2.0",
+    "ruff==0.15.20",
+]
+test = [
+    "httpx==0.28.1",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+]
+
+[tool.uv]
+package = false
+default-groups = ["dev", "test"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["ASYNC", "B", "E", "F", "I", "RUF", "S", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_decorators = false
+
+[tool.pytest.ini_options]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+    "--cov=app",
+    "--cov=tools",
+    "--cov-report=term-missing",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "unit: deterministic tests without infrastructure",
+    "integration: tests against real Compose-managed infrastructure",
+    "api: HTTP boundary tests",
+    "concurrency: transaction and race-condition tests",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["app", "tools"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+

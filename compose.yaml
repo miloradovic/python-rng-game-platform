@@ -1,0 +1,80 @@
+name: rng-game-platform
+
+services:
+  app:
+    build:
+      context: .
+      target: development
+    image: rng-game-platform-app:development
+    init: true
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_NAME: ${APP_NAME:-Python-RNG-Game-Platform}
+      APP_VERSION: ${APP_VERSION:-0.1.0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rng_app}:${POSTGRES_PASSWORD:-local-password}@db:5432/${POSTGRES_DB:-rng_game_platform}
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
+      REDIS_CONNECT_TIMEOUT_SECONDS: ${REDIS_CONNECT_TIMEOUT_SECONDS:-1}
+    volumes:
+      - .:/workspace
+    ports:
+      - 127.0.0.1:${APP_PORT:-8000}:8000
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    networks:
+      - backend
+    restart: "no"
+    stop_grace_period: 10s
+
+  db:
+    image: postgres:18.4-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rng_game_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-rng_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - backend
+    restart: "no"
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:8.8.0-alpine3.23
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    networks:
+      - backend
+    restart: "no"
+    stop_grace_period: 10s
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
