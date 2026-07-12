@@ -21,7 +21,7 @@ async def test_postgresql_connection_and_foundation_revision() -> None:
     finally:
         await database.dispose()
 
-    assert revision == "0001_foundation"
+    assert revision == "0002_domain_catalogue"
 
 
 async def test_real_redis_connection_when_configured() -> None:

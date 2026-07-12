@@ -4,7 +4,8 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
 from app.api.health import router as health_router
 from app.api.router import router as api_router
@@ -12,6 +13,7 @@ from app.cache import create_redis_client, redis_is_available
 from app.config import Settings, get_settings
 from app.database import Database
 from app.logging import configure_logging
+from app.services import DomainError, ForbiddenError, InactiveGameError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = resolved_settings
+
+    @application.exception_handler(DomainError)
+    async def domain_error_handler(request: Request, error: DomainError) -> JSONResponse:
+        del request
+        status_code = {
+            NotFoundError: status.HTTP_404_NOT_FOUND,
+            ForbiddenError: status.HTTP_403_FORBIDDEN,
+            InactiveGameError: status.HTTP_409_CONFLICT,
+        }.get(type(error), status.HTTP_400_BAD_REQUEST)
+        return JSONResponse(status_code=status_code, content={"error": {"code": error.code}})
+
     application.include_router(health_router)
     application.include_router(api_router)
     return application
