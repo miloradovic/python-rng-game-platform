@@ -1,7 +1,7 @@
 """Player and catalogue HTTP adapters."""
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, status
@@ -9,13 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import services
 from app.database import get_session as get_database_session
+from app.models import FairnessProof
 from app.rng import OutcomeProvider
+from app.rng import RewardBand as FairnessRewardBand
 from app.schemas import (
     ClaimRequest,
     FairnessCommitRequest,
     FairnessCommitResponse,
     FairnessEvaluateRequest,
     FairnessEvaluateResponse,
+    FairnessProofResponse,
+    FairnessVerificationResponse,
     GameConfigResponse,
     GameListResponse,
     GameResponse,
@@ -30,6 +34,9 @@ from app.schemas import (
     RewardResponse,
     SessionCreate,
     SessionResponse,
+)
+from app.schemas import (
+    RewardBand as RewardBandResponse,
 )
 
 router = APIRouter()
@@ -232,3 +239,60 @@ async def evaluate_fairness(
         outcome=OutcomeResponse.model_validate(outcome),
         reward=RewardResponse.model_validate(reward),
     )
+
+
+def _fairness_proof_response(
+    proof: FairnessProof, reward_bands: tuple[FairnessRewardBand, ...]
+) -> FairnessProofResponse:
+    """Translate service-validated finalized evidence for the HTTP boundary."""
+
+    return FairnessProofResponse(
+        proof_id=proof.id,
+        outcome_id=cast(UUID, proof.outcome_id),
+        status=proof.status.value,
+        protocol_version=proof.protocol_version,
+        algorithm=proof.algorithm,
+        server_seed_commitment=proof.server_seed_commitment,
+        server_seed_revealed=cast(str, proof.server_seed_revealed),
+        client_seed=cast(str, proof.client_seed),
+        nonce=proof.nonce,
+        game_key=proof.game_key,
+        session_id=proof.session_id,
+        config_version_id=proof.config_version_id,
+        mapping_version=proof.mapping_version,
+        mapping_digest=proof.mapping_digest,
+        reward_bands=[
+            RewardBandResponse(key=band.key, weight=band.weight, value=band.value)
+            for band in reward_bands
+        ],
+        raw_random_value=cast(str, proof.raw_random_value),
+        normalized_value=cast(int, proof.normalized_value),
+        derivation_attempt=cast(int, proof.derivation_attempt),
+        reward_key=cast(str, proof.reward_key),
+        reward_value=cast(int, proof.reward_value),
+        revealed_at=cast(datetime, proof.revealed_at),
+    )
+
+
+@router.get("/fairness/outcomes/{outcome_id}/proof", response_model=FairnessProofResponse)
+async def get_fairness_proof(
+    outcome_id: UUID,
+    session: Session,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+) -> FairnessProofResponse:
+    proof, reward_bands = await services.retrieve_fairness_proof(
+        session, outcome_id=outcome_id, owner_id=owner_id
+    )
+    return _fairness_proof_response(proof, reward_bands)
+
+
+@router.get("/fairness/outcomes/{outcome_id}/verify", response_model=FairnessVerificationResponse)
+async def verify_fairness_proof(
+    outcome_id: UUID,
+    session: Session,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+) -> FairnessVerificationResponse:
+    _, _, code, verified = await services.verify_fairness_proof(
+        session, outcome_id=outcome_id, owner_id=owner_id
+    )
+    return FairnessVerificationResponse(outcome_id=outcome_id, verified=verified, code=code)

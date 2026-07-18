@@ -240,3 +240,39 @@ class FairnessEvaluateResponse(BaseModel):
     status: str
     outcome: OutcomeResponse
     reward: RewardResponse
+
+
+class FairnessProofResponse(BaseModel):
+    """Complete revealed v1 evidence for independent daily-spin reproduction."""
+
+    model_config = ConfigDict(frozen=True)
+    proof_id: UUID
+    outcome_id: UUID
+    status: str
+    protocol_version: str
+    algorithm: str
+    server_seed_commitment: str
+    server_seed_revealed: str
+    client_seed: str
+    nonce: int
+    game_key: str
+    session_id: UUID
+    config_version_id: UUID
+    mapping_version: str
+    mapping_digest: str
+    reward_bands: list[RewardBand]
+    raw_random_value: str
+    normalized_value: int
+    derivation_attempt: int
+    reward_key: str
+    reward_value: int
+    revealed_at: datetime
+
+
+class FairnessVerificationResponse(BaseModel):
+    """A fresh verification verdict, never a persisted success flag."""
+
+    model_config = ConfigDict(frozen=True)
+    outcome_id: UUID
+    verified: bool
+    code: str

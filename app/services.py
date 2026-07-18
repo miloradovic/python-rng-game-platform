@@ -26,6 +26,7 @@ from app.rng import (
     ALGORITHM_HMAC_SHA256,
     DAILY_SPIN_MAPPING_VERSION_V1,
     PROTOCOL_VERSION_V1,
+    DailySpinProof,
     FairnessError,
     OutcomeProvider,
     create_server_seed,
@@ -33,6 +34,7 @@ from app.rng import (
     derive_daily_spin,
     secure_challenge,
     server_seed_commitment,
+    verify_daily_spin_proof,
 )
 from app.rng import (
     RewardBand as FairnessRewardBand,
@@ -711,3 +713,77 @@ async def evaluate_fairness(
     )
     await session.commit()
     return outcome, reward, proof
+
+
+async def retrieve_fairness_proof(
+    session: AsyncSession, *, outcome_id: uuid.UUID, owner_id: uuid.UUID
+) -> tuple[FairnessProof, tuple[FairnessRewardBand, ...]]:
+    """Return only finalized proof evidence owned by the requesting player."""
+
+    outcome = await repositories.get_outcome(session, outcome_id)
+    if outcome is None:
+        raise NotFoundError
+    game_session = await repositories.get_session(session, outcome.session_id)
+    if game_session is None:
+        raise NotFoundError
+    if game_session.player_id != owner_id:
+        raise ForbiddenError
+    proof = await repositories.get_fairness_proof_by_outcome(session, outcome.id)
+    if proof is None:
+        raise NotFoundError
+    if (
+        proof.status != FairnessProofStatus.REVEALED
+        or proof.server_seed_revealed is None
+        or proof.client_seed is None
+        or proof.raw_random_value is None
+        or proof.normalized_value is None
+        or proof.derivation_attempt is None
+        or proof.reward_key is None
+        or proof.reward_value is None
+        or proof.revealed_at is None
+    ):
+        raise InvalidTransitionError
+    config = await repositories.get_config_by_id(session, proof.config_version_id)
+    if config is None:
+        raise NotFoundError
+    return proof, _daily_spin_fairness_bands(config)
+
+
+async def verify_fairness_proof(
+    session: AsyncSession, *, outcome_id: uuid.UUID, owner_id: uuid.UUID
+) -> tuple[FairnessProof, tuple[FairnessRewardBand, ...], str, bool]:
+    """Independently recalculate every stored finalized proof field."""
+
+    proof, bands = await retrieve_fairness_proof(session, outcome_id=outcome_id, owner_id=owner_id)
+    if (
+        proof.server_seed_revealed is None
+        or proof.client_seed is None
+        or proof.raw_random_value is None
+        or proof.normalized_value is None
+        or proof.derivation_attempt is None
+        or proof.reward_key is None
+        or proof.reward_value is None
+    ):
+        raise InvalidTransitionError
+    result = verify_daily_spin_proof(
+        DailySpinProof(
+            protocol_version=proof.protocol_version,
+            algorithm=proof.algorithm,
+            server_seed_commitment=proof.server_seed_commitment,
+            server_seed_hex=proof.server_seed_revealed,
+            client_seed=proof.client_seed,
+            nonce=proof.nonce,
+            game_key=proof.game_key,
+            config_version_id=proof.config_version_id,
+            session_id=proof.session_id,
+            reward_bands=bands,
+            mapping_version=proof.mapping_version,
+            mapping_digest=proof.mapping_digest,
+            raw_digest_hex=proof.raw_random_value,
+            normalized_value=proof.normalized_value,
+            attempt=proof.derivation_attempt,
+            reward_key=proof.reward_key,
+            reward_value=proof.reward_value,
+        )
+    )
+    return proof, bands, result.code, result.verified

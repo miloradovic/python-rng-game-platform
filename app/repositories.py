@@ -447,3 +447,14 @@ async def lock_fairness_proof(session: AsyncSession, proof_id: uuid.UUID) -> Fai
         select(FairnessProof).where(FairnessProof.id == proof_id).with_for_update()
     )
     return proof
+
+
+async def get_fairness_proof_by_outcome(
+    session: AsyncSession, outcome_id: uuid.UUID
+) -> FairnessProof | None:
+    """Load the unique proof bound to an authoritative outcome."""
+
+    proof: FairnessProof | None = await session.scalar(
+        select(FairnessProof).where(FairnessProof.outcome_id == outcome_id)
+    )
+    return proof

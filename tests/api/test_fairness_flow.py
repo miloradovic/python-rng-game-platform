@@ -77,5 +77,26 @@ async def test_daily_spin_commit_and_evaluate_are_authorized_and_idempotent() ->
             assert evaluated.json()["status"] == "revealed"
             assert evaluated.json()["outcome"]["result"]["reward_key"]
             assert "server_seed" not in evaluated.json()
+
+            outcome_id = evaluated.json()["outcome"]["id"]
+            proof = await client.get(
+                f"/api/v1/fairness/outcomes/{outcome_id}/proof", headers=headers
+            )
+            verification = await client.get(
+                f"/api/v1/fairness/outcomes/{outcome_id}/verify", headers=headers
+            )
+            forbidden_proof = await client.get(
+                f"/api/v1/fairness/outcomes/{outcome_id}/proof",
+                headers={"X-Player-ID": other.json()["id"]},
+            )
+            assert proof.status_code == 200
+            assert proof.json()["server_seed_revealed"]
+            assert proof.json()["reward_bands"]
+            assert verification.json() == {
+                "outcome_id": outcome_id,
+                "verified": True,
+                "code": "verified",
+            }
+            assert forbidden_proof.status_code == 403
     finally:
         await database.dispose()
