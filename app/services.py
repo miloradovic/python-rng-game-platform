@@ -342,6 +342,11 @@ async def play_session(
         raise ForbiddenError
     now = clock()
     if expire_if_due(game_session, now):
+        existing = await repositories.lock_fairness_proof_by_session(session, game_session.id)
+        if existing is not None:
+            await _end_committed_fairness_proof(
+                session, existing, status=FairnessProofStatus.EXPIRED, now=now
+            )
         await session.commit()
         raise SessionExpiredError
     if game_session.status != SessionStatus.ACTIVE:
@@ -353,6 +358,8 @@ async def play_session(
     if game.key == "daily_spin":
         if choice is not None or actions is not None:
             raise InvalidPlayError
+        if await repositories.lock_fairness_proof_by_session(session, game_session.id) is not None:
+            raise InvalidTransitionError
         result = _daily_spin_result(game_session, game.key, config, provider)
     elif game.key == "prediction_card":
         if actions is not None:
@@ -468,12 +475,18 @@ async def retrieve_session(
     owner_id: uuid.UUID,
     clock: Callable[[], datetime] = utc_now,
 ) -> GameSession:
-    game_session = await repositories.get_session(session, session_id)
+    game_session = await repositories.lock_session(session, session_id)
     if game_session is None:
         raise NotFoundError
     if game_session.player_id != owner_id:
         raise ForbiddenError
-    if expire_if_due(game_session, clock()):
+    now = clock()
+    if expire_if_due(game_session, now):
+        proof = await repositories.lock_fairness_proof_by_session(session, game_session.id)
+        if proof is not None:
+            await _end_committed_fairness_proof(
+                session, proof, status=FairnessProofStatus.EXPIRED, now=now
+            )
         await session.commit()
     return game_session
 
@@ -481,12 +494,18 @@ async def retrieve_session(
 async def cancel_session(
     session: AsyncSession, session_id: uuid.UUID, owner_id: uuid.UUID
 ) -> GameSession:
-    game_session = await repositories.get_session(session, session_id)
+    game_session = await repositories.lock_session(session, session_id)
     if game_session is None:
         raise NotFoundError
     if game_session.player_id != owner_id:
         raise ForbiddenError
-    cancel_active(game_session, utc_now())
+    now = utc_now()
+    cancel_active(game_session, now)
+    proof = await repositories.lock_fairness_proof_by_session(session, game_session.id)
+    if proof is not None:
+        await _end_committed_fairness_proof(
+            session, proof, status=FairnessProofStatus.CANCELLED, now=now
+        )
     await session.commit()
     return game_session
 
@@ -524,6 +543,47 @@ def _daily_spin_fairness_bands(config: GameConfigVersion) -> tuple[FairnessRewar
     )
 
 
+async def _end_committed_fairness_proof(
+    session: AsyncSession,
+    proof: FairnessProof,
+    *,
+    status: FairnessProofStatus,
+    now: datetime,
+) -> None:
+    """Terminally retire an unrevealed proof and its seed custody evidence."""
+
+    if proof.status != FairnessProofStatus.COMMITTED:
+        return
+    if status not in (FairnessProofStatus.EXPIRED, FairnessProofStatus.CANCELLED):
+        raise InvalidTransitionError
+    previous_event = await repositories.lock_latest_fairness_proof_event(session, proof.id)
+    if previous_event is None:
+        raise InvalidTransitionError
+    proof.status = status
+    await repositories.delete_fairness_seed_custody(session, proof.id)
+    sequence = previous_event.sequence + 1
+    event_type = status.value
+    await repositories.add_fairness_proof_event(
+        session,
+        FairnessProofEvent(
+            proof_id=proof.id,
+            sequence=sequence,
+            event_type=event_type,
+            status=status,
+            previous_evidence_hash=previous_event.evidence_hash,
+            evidence_hash=_fairness_event_hash(
+                proof_id=proof.id,
+                sequence=sequence,
+                event_type=event_type,
+                status=status,
+                created_at=now,
+                previous_evidence_hash=previous_event.evidence_hash,
+            ),
+            created_at=now,
+        ),
+    )
+
+
 async def commit_fairness(
     session: AsyncSession,
     *,
@@ -540,6 +600,11 @@ async def commit_fairness(
         raise ForbiddenError
     now = clock()
     if expire_if_due(game_session, now):
+        existing = await repositories.lock_fairness_proof_by_session(session, game_session.id)
+        if existing is not None:
+            await _end_committed_fairness_proof(
+                session, existing, status=FairnessProofStatus.EXPIRED, now=now
+            )
         await session.commit()
         raise SessionExpiredError
     if game_session.status != SessionStatus.ACTIVE:
@@ -630,6 +695,9 @@ async def evaluate_fairness(
         raise NotFoundError
     now = clock()
     if expire_if_due(game_session, now):
+        await _end_committed_fairness_proof(
+            session, proof, status=FairnessProofStatus.EXPIRED, now=now
+        )
         await session.commit()
         raise SessionExpiredError
     if proof.status != FairnessProofStatus.COMMITTED or game_session.status != SessionStatus.ACTIVE:
@@ -677,19 +745,15 @@ async def evaluate_fairness(
     proof.evaluated_at = now
     proof.server_seed_revealed = custody.server_seed_material.hex()
     proof.revealed_at = now
+    previous_event = await repositories.lock_latest_fairness_proof_event(session, proof.id)
+    if previous_event is None:
+        raise InvalidTransitionError
     event = FairnessProofEvent(
         proof_id=proof.id,
         sequence=1,
         event_type="revealed",
         status=FairnessProofStatus.REVEALED,
-        previous_evidence_hash=_fairness_event_hash(
-            proof_id=proof.id,
-            sequence=0,
-            event_type="committed",
-            status=FairnessProofStatus.COMMITTED,
-            created_at=proof.created_at,
-            previous_evidence_hash=None,
-        ),
+        previous_evidence_hash=previous_event.evidence_hash,
         evidence_hash="0" * 64,
         created_at=now,
     )

@@ -60,6 +60,23 @@ docker compose run --rm app mypy app tests tools
 docker compose run --rm app pytest
 ```
 
+## Provably fair daily spin
+
+`daily_spin` supports a commitment/reveal proof: commit before evaluation, submit only a client
+seed, then retrieve or independently re-check the revealed proof. The server owns the nonce,
+selected immutable configuration, mapping, outcome, reward, and reveal timing. See the complete
+[v1 protocol](docs/provably-fair-protocol.md), including canonical bytes, fixed vectors, custody,
+tamper-evidence limits, and trust assumptions.
+
+```console
+docker compose run --rm app python -m tools.simulate daily_spin --runs 100000
+```
+
+The deterministic simulation uses the production derivation and mapping functions without opening
+or mutating durable state. It reports the seeded version-1 config fingerprint, expected and
+observed distributions, and a five-standard-deviation sanity criterion. It is a reproducible
+mapping check, not proof of future randomness or a regulatory/certification claim.
+
 ## API flow
 
 Create a player, preserving the returned identifier as the demo authorization header:
@@ -117,6 +134,8 @@ Related reads are:
 - `GET /api/v1/sessions/{session_id}`
 - `GET /api/v1/players/{player_id}/rewards?limit=20&offset=0`
 - `GET /api/v1/audit/outcomes/{outcome_id}`
+- `GET /api/v1/fairness/outcomes/{outcome_id}/proof`
+- `GET /api/v1/fairness/outcomes/{outcome_id}/verify`
 - `GET /api/v1/analytics/game-summary`
 
 All player/session/reward/audit/analytics reads require `X-Player-ID` and enforce ownership. Stable
@@ -153,10 +172,11 @@ Connection URLs and the HMAC key are secret settings and are not logged. Client 
 stable domain codes or validation details, not SQL, stack traces, or configuration. The current
 `X-Player-ID` boundary is intentionally demo authorization, not production authentication.
 
-The current HMAC-SHA256 rejection-sampling provider is a cryptographic, unbiased outcome seam. The
-mandatory next module is Plan 3: commitment/reveal, public proof verification, tamper detection,
-seed rotation, and distribution simulation without changing the rule-facing `OutcomeProvider`
-contract. Plan 4 may later add PostgreSQL-authoritative score submissions and settlements plus a
-disposable Redis leaderboard projection. Neither extension should introduce microservices, a
-message broker, or a second durable source of truth.
+The HMAC-SHA256 protocol is versioned and uses rejection sampling for unbiased mapping. It stores
+unrevealed seed material separately, reveals it only with finalized proof evidence, and uses an
+append-only proof-event hash chain. This detects ordinary stored-field changes but does not claim
+that a privileged database operator cannot alter data or disable protections. Plan 4 may later add
+PostgreSQL-authoritative score submissions and settlements plus a disposable Redis leaderboard
+projection; neither extension should introduce microservices, a message broker, or a second durable
+source of truth.
 

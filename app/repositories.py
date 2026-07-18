@@ -435,9 +435,32 @@ async def get_fairness_seed_custody(
     return custody
 
 
+async def delete_fairness_seed_custody(session: AsyncSession, proof_id: uuid.UUID) -> None:
+    """Remove unrevealed seed material after a terminal non-reveal transition."""
+
+    custody = await get_fairness_seed_custody(session, proof_id)
+    if custody is not None:
+        await session.delete(custody)
+
+
 async def add_fairness_proof_event(session: AsyncSession, event: FairnessProofEvent) -> None:
     session.add(event)
     await session.flush()
+
+
+async def lock_latest_fairness_proof_event(
+    session: AsyncSession, proof_id: uuid.UUID
+) -> FairnessProofEvent | None:
+    """Lock the latest append-only event to extend its durable hash chain."""
+
+    event: FairnessProofEvent | None = await session.scalar(
+        select(FairnessProofEvent)
+        .where(FairnessProofEvent.proof_id == proof_id)
+        .order_by(FairnessProofEvent.sequence.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    return event
 
 
 async def lock_fairness_proof(session: AsyncSession, proof_id: uuid.UUID) -> FairnessProof | None:

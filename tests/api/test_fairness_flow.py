@@ -62,6 +62,12 @@ async def test_daily_spin_commit_and_evaluate_are_authorized_and_idempotent() ->
             assert committed.json()["status"] == "committed"
             assert "server_seed" not in committed.json()
 
+            bypass_attempt = await client.post(
+                f"/api/v1/sessions/{session_id}/play", headers=headers, json={}
+            )
+            assert bypass_attempt.status_code == 409
+            assert "server_seed" not in bypass_attempt.text
+
             evaluated = await client.post(
                 "/api/v1/fairness/evaluate",
                 headers=headers,

@@ -21,7 +21,6 @@ from pydantic import ValidationError
 from app.rng import (
     ALGORITHM_HMAC_SHA256,
     DAILY_SPIN_MAPPING_VERSION_V1,
-    MAX_NONCE,
     PROTOCOL_VERSION_V1,
     FairnessError,
     RewardBand,
@@ -32,6 +31,7 @@ from app.schemas import DailySpinConfig, game_config_adapter
 from tools.seed import CATALOGUE
 
 DEFAULT_RUNS = 100_000
+MAX_SIMULATION_RUNS = 1_000_000
 SIMULATION_VERSION = "daily-spin-distribution-simulation-v1"
 CONFIG_SOURCE = "tools.seed.CATALOGUE:daily_spin:version=1"
 CONFIG_VERSION = 1
@@ -107,8 +107,8 @@ def _seeded_daily_spin_config() -> DailySpinConfig:
 def simulate_daily_spin(runs: int = DEFAULT_RUNS) -> SimulationReport:
     """Exercise the v1 production derivation path with deterministic fixture inputs."""
 
-    if not isinstance(runs, int) or isinstance(runs, bool) or not 1 <= runs <= MAX_NONCE + 1:
-        raise SimulationInputError(f"runs must be an integer between 1 and {MAX_NONCE + 1}")
+    if not isinstance(runs, int) or isinstance(runs, bool) or not 1 <= runs <= MAX_SIMULATION_RUNS:
+        raise SimulationInputError(f"runs must be an integer between 1 and {MAX_SIMULATION_RUNS}")
 
     reward_bands = seeded_daily_spin_reward_bands()
     try:

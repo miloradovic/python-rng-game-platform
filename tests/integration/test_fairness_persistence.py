@@ -3,7 +3,7 @@
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app import services
@@ -190,5 +190,37 @@ async def test_fairness_evidence_is_append_only() -> None:
                     text("DELETE FROM fairness_proofs WHERE id = :id"),
                     {"id": proof.id},
                 )
+    finally:
+        await database.dispose()
+
+
+async def test_cancelling_a_committed_session_removes_unrevealed_seed_custody() -> None:
+    database = Database(get_settings())
+    try:
+        player_id, game_session = await _daily_spin_session(database, "Cancelled Fairness")
+        async with database.session_factory() as session:
+            proof = await services.commit_fairness(
+                session, session_id=game_session.id, owner_id=player_id
+            )
+        async with database.session_factory() as session:
+            _ = await services.cancel_session(session, game_session.id, player_id)
+
+        async with database.session_factory() as session:
+            stored = await session.get(FairnessProof, proof.id)
+            custody = await session.get(FairnessSeedCustody, proof.id)
+            events = list(
+                (
+                    await session.scalars(
+                        select(FairnessProofEvent)
+                        .where(FairnessProofEvent.proof_id == proof.id)
+                        .order_by(FairnessProofEvent.sequence)
+                    )
+                ).all()
+            )
+            assert stored is not None
+            assert stored.status == FairnessProofStatus.CANCELLED
+            assert custody is None
+            assert len(events) == 2
+            assert events[1].previous_evidence_hash == events[0].evidence_hash
     finally:
         await database.dispose()
