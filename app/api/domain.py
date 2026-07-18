@@ -12,6 +12,10 @@ from app.database import get_session as get_database_session
 from app.rng import OutcomeProvider
 from app.schemas import (
     ClaimRequest,
+    FairnessCommitRequest,
+    FairnessCommitResponse,
+    FairnessEvaluateRequest,
+    FairnessEvaluateResponse,
     GameConfigResponse,
     GameListResponse,
     GameResponse,
@@ -189,4 +193,42 @@ async def get_game_summary(
         start_at=start_at,
         end_at=end_at,
         game_key=game_key,
+    )
+
+
+@router.post(
+    "/fairness/commit", response_model=FairnessCommitResponse, status_code=status.HTTP_201_CREATED
+)
+async def commit_fairness(
+    body: FairnessCommitRequest,
+    session: Session,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+) -> FairnessCommitResponse:
+    proof = await services.commit_fairness(session, session_id=body.session_id, owner_id=owner_id)
+    return FairnessCommitResponse(
+        proof_id=proof.id,
+        status=proof.status.value,
+        protocol_version=proof.protocol_version,
+        algorithm=proof.algorithm,
+        server_seed_commitment=proof.server_seed_commitment,
+        session_id=proof.session_id,
+        game_key=proof.game_key,
+        config_version_id=proof.config_version_id,
+    )
+
+
+@router.post("/fairness/evaluate", response_model=FairnessEvaluateResponse)
+async def evaluate_fairness(
+    body: FairnessEvaluateRequest,
+    session: Session,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+) -> FairnessEvaluateResponse:
+    outcome, reward, proof = await services.evaluate_fairness(
+        session, proof_id=body.proof_id, owner_id=owner_id, client_seed=body.client_seed
+    )
+    return FairnessEvaluateResponse(
+        proof_id=proof.id,
+        status=proof.status.value,
+        outcome=OutcomeResponse.model_validate(outcome),
+        reward=RewardResponse.model_validate(reward),
     )

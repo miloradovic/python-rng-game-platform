@@ -71,6 +71,20 @@ Content-Type: application/json
 {"display_name":"Demo Player"}
 ```
 
+For `daily_spin`, a player can commit the server seed before evaluation, then submit only a client seed. Both endpoints require `X-Player-ID`; commitment and evaluation retries are idempotent.
+
+```http
+POST /api/v1/fairness/commit
+
+{"session_id":"{daily_spin_session_id}"}
+```
+
+```http
+POST /api/v1/fairness/evaluate
+
+{"proof_id":"{proof_id}","client_seed":"demo-client-seed"}
+```
+
 Start, play, and claim a session:
 
 ```http
@@ -145,3 +159,4 @@ seed rotation, and distribution simulation without changing the rule-facing `Out
 contract. Plan 4 may later add PostgreSQL-authoritative score submissions and settlements plus a
 disposable Redis leaderboard projection. Neither extension should introduce microservices, a
 message broker, or a second durable source of truth.
+

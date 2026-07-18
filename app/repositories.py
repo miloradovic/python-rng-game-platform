@@ -11,6 +11,9 @@ from app.models import (
     AnalyticsEvent,
     AuditRecord,
     ConfigStatus,
+    FairnessProof,
+    FairnessProofEvent,
+    FairnessSeedCustody,
     Game,
     GameConfigVersion,
     GameSession,
@@ -394,3 +397,53 @@ async def game_summary(
         )
         for row in rows
     ]
+
+
+async def lock_fairness_proof_by_session(
+    session: AsyncSession, session_id: uuid.UUID
+) -> FairnessProof | None:
+    """Lock the one proof bound to a session for replay-safe evaluation."""
+
+    proof: FairnessProof | None = await session.scalar(
+        select(FairnessProof).where(FairnessProof.session_id == session_id).with_for_update()
+    )
+    return proof
+
+
+async def add_fairness_proof(session: AsyncSession, proof: FairnessProof) -> FairnessProof:
+    session.add(proof)
+    await session.flush()
+    await session.refresh(proof)
+    return proof
+
+
+async def add_fairness_seed_custody(
+    session: AsyncSession, proof_id: uuid.UUID, server_seed: bytes
+) -> FairnessSeedCustody:
+    custody = FairnessSeedCustody(proof_id=proof_id, server_seed_material=server_seed)
+    session.add(custody)
+    await session.flush()
+    return custody
+
+
+async def get_fairness_seed_custody(
+    session: AsyncSession, proof_id: uuid.UUID
+) -> FairnessSeedCustody | None:
+    custody: FairnessSeedCustody | None = await session.scalar(
+        select(FairnessSeedCustody).where(FairnessSeedCustody.proof_id == proof_id)
+    )
+    return custody
+
+
+async def add_fairness_proof_event(session: AsyncSession, event: FairnessProofEvent) -> None:
+    session.add(event)
+    await session.flush()
+
+
+async def lock_fairness_proof(session: AsyncSession, proof_id: uuid.UUID) -> FairnessProof | None:
+    """Lock one proof by its public identifier."""
+
+    proof: FairnessProof | None = await session.scalar(
+        select(FairnessProof).where(FairnessProof.id == proof_id).with_for_update()
+    )
+    return proof

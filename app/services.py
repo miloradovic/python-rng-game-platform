@@ -1,5 +1,6 @@
 """Business use cases and explicit transaction boundaries."""
 
+import hashlib
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -8,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
 from app.models import (
+    FairnessProof,
+    FairnessProofEvent,
+    FairnessProofStatus,
     Game,
     GameConfigVersion,
     GameSession,
@@ -18,7 +22,21 @@ from app.models import (
     RewardStatus,
     SessionStatus,
 )
-from app.rng import OutcomeProvider, secure_challenge
+from app.rng import (
+    ALGORITHM_HMAC_SHA256,
+    DAILY_SPIN_MAPPING_VERSION_V1,
+    PROTOCOL_VERSION_V1,
+    FairnessError,
+    OutcomeProvider,
+    create_server_seed,
+    daily_spin_mapping_digest,
+    derive_daily_spin,
+    secure_challenge,
+    server_seed_commitment,
+)
+from app.rng import (
+    RewardBand as FairnessRewardBand,
+)
 from app.schemas import game_config_adapter
 
 
@@ -469,3 +487,227 @@ async def cancel_session(
     cancel_active(game_session, utc_now())
     await session.commit()
     return game_session
+
+
+def _fairness_event_hash(
+    *,
+    proof_id: uuid.UUID,
+    sequence: int,
+    event_type: str,
+    status: FairnessProofStatus,
+    created_at: datetime,
+    previous_evidence_hash: str | None,
+) -> str:
+    """Produce the frozen v1 append-only event hash from explicit UTC evidence."""
+
+    timestamp = created_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    evidence = (
+        "RNG-GAME-PLATFORM-PVF-EVENT/1\n"
+        f"proof_id={proof_id}\n"
+        f"sequence={sequence}\n"
+        f"event_type={event_type}\n"
+        f"status={status.value}\n"
+        f"created_at={timestamp}\n"
+        f"previous_evidence_hash={previous_evidence_hash or ''}\n"
+    )
+    return hashlib.sha256(evidence.encode("ascii")).hexdigest()
+
+
+def _daily_spin_fairness_bands(config: GameConfigVersion) -> tuple[FairnessRewardBand, ...]:
+    payload = game_config_adapter.validate_python(config.payload)
+    if payload.game_type != "daily_spin":
+        raise InvalidPlayError
+    return tuple(
+        FairnessRewardBand(reward.key, reward.weight, reward.value) for reward in payload.rewards
+    )
+
+
+async def commit_fairness(
+    session: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    clock: Callable[[], datetime] = utc_now,
+) -> FairnessProof:
+    """Durably commit a server seed before any daily-spin outcome is evaluated."""
+
+    game_session = await repositories.lock_session(session, session_id)
+    if game_session is None:
+        raise NotFoundError
+    if game_session.player_id != owner_id:
+        raise ForbiddenError
+    now = clock()
+    if expire_if_due(game_session, now):
+        await session.commit()
+        raise SessionExpiredError
+    if game_session.status != SessionStatus.ACTIVE:
+        raise InvalidTransitionError
+    game = await repositories.get_game_by_id(session, game_session.game_id)
+    config = await repositories.get_config_by_id(session, game_session.config_version_id)
+    if game is None or config is None or game.key != "daily_spin" or config.game_id != game.id:
+        raise InvalidPlayError
+    existing = await repositories.lock_fairness_proof_by_session(session, game_session.id)
+    if existing is not None:
+        await session.commit()
+        return existing
+    bands = _daily_spin_fairness_bands(config)
+    seed = create_server_seed()
+    proof = FairnessProof(
+        session_id=game_session.id,
+        player_id=owner_id,
+        game_id=game.id,
+        game_key=game.key,
+        config_version_id=config.id,
+        outcome_id=None,
+        status=FairnessProofStatus.COMMITTED,
+        protocol_version=PROTOCOL_VERSION_V1,
+        algorithm=ALGORITHM_HMAC_SHA256,
+        server_seed_commitment=server_seed_commitment(seed),
+        nonce=0,
+        client_seed=None,
+        mapping_version=DAILY_SPIN_MAPPING_VERSION_V1,
+        mapping_digest=daily_spin_mapping_digest(bands),
+        raw_random_value=None,
+        normalized_value=None,
+        derivation_attempt=None,
+        reward_key=None,
+        reward_value=None,
+        evaluated_at=None,
+        server_seed_revealed=None,
+        revealed_at=None,
+    )
+    proof = await repositories.add_fairness_proof(session, proof)
+    await repositories.add_fairness_seed_custody(session, proof.id, seed)
+    event = FairnessProofEvent(
+        proof_id=proof.id,
+        sequence=0,
+        event_type="committed",
+        status=FairnessProofStatus.COMMITTED,
+        previous_evidence_hash=None,
+        evidence_hash=_fairness_event_hash(
+            proof_id=proof.id,
+            sequence=0,
+            event_type="committed",
+            status=FairnessProofStatus.COMMITTED,
+            created_at=now,
+            previous_evidence_hash=None,
+        ),
+        created_at=now,
+    )
+    await repositories.add_fairness_proof_event(session, event)
+    await session.commit()
+    return proof
+
+
+async def evaluate_fairness(
+    session: AsyncSession,
+    *,
+    proof_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    client_seed: str,
+    clock: Callable[[], datetime] = utc_now,
+) -> tuple[Outcome, Reward, FairnessProof]:
+    """Atomically reveal a committed daily-spin outcome and its one reward entitlement."""
+
+    proof = await repositories.lock_fairness_proof(session, proof_id)
+    if proof is None:
+        raise NotFoundError
+    if proof.player_id != owner_id:
+        raise ForbiddenError
+    if proof.status == FairnessProofStatus.REVEALED:
+        if proof.outcome_id is None:
+            raise InvalidTransitionError
+        outcome = await repositories.get_outcome(session, proof.outcome_id)
+        reward = await repositories.lock_reward_by_session(session, proof.session_id)
+        if outcome is None or reward is None:
+            raise NotFoundError
+        await session.commit()
+        return outcome, reward, proof
+    game_session = await repositories.lock_session(session, proof.session_id)
+    if game_session is None:
+        raise NotFoundError
+    now = clock()
+    if expire_if_due(game_session, now):
+        await session.commit()
+        raise SessionExpiredError
+    if proof.status != FairnessProofStatus.COMMITTED or game_session.status != SessionStatus.ACTIVE:
+        raise InvalidTransitionError
+    game = await repositories.get_game_by_id(session, proof.game_id)
+    config = await repositories.get_config_by_id(session, proof.config_version_id)
+    custody = await repositories.get_fairness_seed_custody(session, proof.id)
+    if game is None or config is None or custody is None or game.key != "daily_spin":
+        raise NotFoundError
+    try:
+        derivation = derive_daily_spin(
+            server_seed=custody.server_seed_material,
+            client_seed=client_seed,
+            nonce=proof.nonce,
+            config_version_id=proof.config_version_id,
+            session_id=proof.session_id,
+            reward_bands=_daily_spin_fairness_bands(config),
+            game_key=proof.game_key,
+            protocol_version=proof.protocol_version,
+            algorithm=proof.algorithm,
+            mapping_version=proof.mapping_version,
+        )
+    except FairnessError as error:
+        raise InvalidPlayError from error
+    outcome = await repositories.add_outcome(
+        session,
+        game_session,
+        {
+            "reward_key": derivation.reward.key,
+            "normalized_value": derivation.normalized_value,
+            "derivation_digest": derivation.raw_digest_hex,
+        },
+    )
+    reward = await repositories.add_reward(
+        session, outcome, player_id=owner_id, value=derivation.reward.value
+    )
+    proof.outcome_id = outcome.id
+    proof.status = FairnessProofStatus.REVEALED
+    proof.client_seed = client_seed
+    proof.raw_random_value = derivation.raw_digest_hex
+    proof.normalized_value = derivation.normalized_value
+    proof.derivation_attempt = derivation.attempt
+    proof.reward_key = derivation.reward.key
+    proof.reward_value = derivation.reward.value
+    proof.evaluated_at = now
+    proof.server_seed_revealed = custody.server_seed_material.hex()
+    proof.revealed_at = now
+    event = FairnessProofEvent(
+        proof_id=proof.id,
+        sequence=1,
+        event_type="revealed",
+        status=FairnessProofStatus.REVEALED,
+        previous_evidence_hash=_fairness_event_hash(
+            proof_id=proof.id,
+            sequence=0,
+            event_type="committed",
+            status=FairnessProofStatus.COMMITTED,
+            created_at=proof.created_at,
+            previous_evidence_hash=None,
+        ),
+        evidence_hash="0" * 64,
+        created_at=now,
+    )
+    event.evidence_hash = _fairness_event_hash(
+        proof_id=proof.id,
+        sequence=1,
+        event_type="revealed",
+        status=FairnessProofStatus.REVEALED,
+        created_at=now,
+        previous_evidence_hash=event.previous_evidence_hash,
+    )
+    await repositories.add_fairness_proof_event(session, event)
+    game_session.status = SessionStatus.COMPLETED
+    game_session.ended_at = now
+    await repositories.add_outcome_audit(session, outcome, player_id=owner_id, game_key=game.key)
+    await repositories.add_game_played_event(
+        session, outcome, player_id=owner_id, game_key=game.key
+    )
+    await repositories.add_reward_evidence(
+        session, reward, event_type="reward_issued", game_key=game.key
+    )
+    await session.commit()
+    return outcome, reward, proof

@@ -201,3 +201,42 @@ class GameSummaryResponse(BaseModel):
     start_at: datetime | None
     end_at: datetime | None
     game_key: str | None
+
+
+class FairnessCommitRequest(BaseModel):
+    """Player intent to commit fairness evidence for an active daily-spin session."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    session_id: UUID
+
+
+class FairnessCommitResponse(BaseModel):
+    """Pre-evaluation public commitment; it deliberately excludes the server seed."""
+
+    model_config = ConfigDict(frozen=True)
+    proof_id: UUID
+    status: str
+    protocol_version: str
+    algorithm: str
+    server_seed_commitment: str
+    session_id: UUID
+    game_key: str
+    config_version_id: UUID
+
+
+class FairnessEvaluateRequest(BaseModel):
+    """The only client-controlled input to a committed fairness evaluation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    proof_id: UUID
+    client_seed: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class FairnessEvaluateResponse(BaseModel):
+    """Final authoritative result; full proof retrieval is introduced in Phase 5."""
+
+    model_config = ConfigDict(frozen=True)
+    proof_id: UUID
+    status: str
+    outcome: OutcomeResponse
+    reward: RewardResponse
