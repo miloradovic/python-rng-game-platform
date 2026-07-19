@@ -172,7 +172,8 @@ class ClaimRequest(BaseModel):
 class RewardResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, frozen=True)
     id: UUID
-    outcome_id: UUID
+    outcome_id: UUID | None
+    settlement_recipient_id: UUID | None
     player_id: UUID
     status: RewardStatus
     value: int
@@ -276,3 +277,75 @@ class FairnessVerificationResponse(BaseModel):
     outcome_id: UUID
     verified: bool
     code: str
+
+
+class FinalScoreCreate(BaseModel):
+    """Intent-only score submission; every score field is server-owned."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    session_id: UUID
+
+
+class FinalScoreResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, frozen=True)
+    id: UUID
+    player_id: UUID
+    game_id: UUID
+    session_id: UUID
+    outcome_id: UUID
+    config_version_id: UUID
+    period_start: datetime
+    completed_at: datetime
+    final_score: int
+    created_at: datetime
+
+
+class LeaderboardEntry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    rank: int
+    score_id: UUID
+    player_id: UUID
+    session_id: UUID
+    final_score: int
+    completed_at: datetime
+
+
+class LeaderboardResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    game_key: str
+    period_start: datetime
+    period_end: datetime
+    source: Literal["redis", "postgresql"]
+    items: list[LeaderboardEntry]
+    next_cursor: str | None
+
+
+class PlayerRankResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    game_key: str
+    period_start: datetime
+    period_end: datetime
+    source: Literal["redis", "postgresql"]
+    entry: LeaderboardEntry
+
+
+class SettlementRecipientResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, frozen=True)
+    id: UUID
+    player_id: UUID
+    score_id: UUID
+    rank: int
+    tier_key: str
+    reward_value: int
+
+
+class SettlementResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    id: UUID
+    game_key: str
+    period_start: datetime
+    period_end: datetime
+    tier_config_id: UUID
+    status: str
+    completed_at: datetime
+    recipients: list[SettlementRecipientResponse]

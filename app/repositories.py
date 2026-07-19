@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Integer, cast, func, select
+from sqlalchemy import Integer, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -14,6 +14,7 @@ from app.models import (
     FairnessProof,
     FairnessProofEvent,
     FairnessSeedCustody,
+    FinalScore,
     Game,
     GameConfigVersion,
     GameSession,
@@ -22,7 +23,10 @@ from app.models import (
     Player,
     Reward,
     RewardStatus,
+    RewardTierConfig,
     SessionStatus,
+    SettlementRecipient,
+    SettlementRun,
 )
 
 
@@ -155,6 +159,158 @@ async def get_game_by_id(session: AsyncSession, game_id: uuid.UUID) -> Game | No
     return await session.get(Game, game_id)
 
 
+async def get_outcome_by_session(session: AsyncSession, session_id: uuid.UUID) -> Outcome | None:
+    outcome: Outcome | None = await session.scalar(
+        select(Outcome).where(Outcome.session_id == session_id)
+    )
+    return outcome
+
+
+async def get_final_score_by_session(
+    session: AsyncSession, session_id: uuid.UUID
+) -> FinalScore | None:
+    score: FinalScore | None = await session.scalar(
+        select(FinalScore).where(FinalScore.session_id == session_id)
+    )
+    return score
+
+
+async def add_final_score(session: AsyncSession, score: FinalScore) -> FinalScore:
+    session.add(score)
+    await session.flush()
+    await session.refresh(score)
+    return score
+
+
+async def add_final_score_evidence(
+    session: AsyncSession, score: FinalScore, *, game_key: str
+) -> None:
+    """Append score audit and analytics evidence in the score transaction."""
+    evidence = {
+        "score_id": str(score.id),
+        "session_id": str(score.session_id),
+        "outcome_id": str(score.outcome_id),
+        "player_id": str(score.player_id),
+        "game_key": game_key,
+        "config_version_id": str(score.config_version_id),
+        "period_start": score.period_start.isoformat(),
+        "completed_at": score.completed_at.isoformat(),
+        "final_score": score.final_score,
+    }
+    session.add(
+        AuditRecord(
+            event_type="final_score_submitted",
+            entity_type="final_score",
+            entity_id=score.id,
+            evidence=evidence,
+        )
+    )
+    session.add(
+        AnalyticsEvent(
+            event_key=f"final_score_submitted:{score.id}",
+            event_type="final_score_submitted",
+            player_id=score.player_id,
+            payload=evidence,
+        )
+    )
+
+
+def _ranking_order() -> tuple[object, ...]:
+    return (
+        FinalScore.final_score.desc(),
+        FinalScore.completed_at.asc(),
+        FinalScore.session_id.asc(),
+    )
+
+
+async def list_canonical_scores(
+    session: AsyncSession,
+    *,
+    game_id: uuid.UUID,
+    period_start: datetime,
+    limit: int | None = None,
+    offset: int = 0,
+    after: tuple[int, datetime, uuid.UUID] | None = None,
+) -> list[FinalScore]:
+    statement = select(FinalScore).where(
+        FinalScore.game_id == game_id, FinalScore.period_start == period_start
+    )
+    if after is not None:
+        after_score, after_completed, after_session = after
+        statement = statement.where(
+            or_(
+                FinalScore.final_score < after_score,
+                and_(
+                    FinalScore.final_score == after_score,
+                    FinalScore.completed_at > after_completed,
+                ),
+                and_(
+                    FinalScore.final_score == after_score,
+                    FinalScore.completed_at == after_completed,
+                    FinalScore.session_id > after_session,
+                ),
+            )
+        )
+    statement = statement.order_by(
+        FinalScore.final_score.desc(),
+        FinalScore.completed_at.asc(),
+        FinalScore.session_id.asc(),
+    )
+    if offset:
+        statement = statement.offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
+    return list(await session.scalars(statement))
+
+
+async def count_canonical_scores(
+    session: AsyncSession, *, game_id: uuid.UUID, period_start: datetime
+) -> int:
+    count = await session.scalar(
+        select(func.count())
+        .select_from(FinalScore)
+        .where(FinalScore.game_id == game_id, FinalScore.period_start == period_start)
+    )
+    return int(count or 0)
+
+
+async def player_canonical_rank(
+    session: AsyncSession,
+    *,
+    player_id: uuid.UUID,
+    game_id: uuid.UUID,
+    period_start: datetime,
+) -> tuple[FinalScore, int] | None:
+    ranked = (
+        select(
+            FinalScore.id.label("score_id"),
+            func.row_number()
+            .over(
+                order_by=(
+                    FinalScore.final_score.desc(),
+                    FinalScore.completed_at.asc(),
+                    FinalScore.session_id.asc(),
+                )
+            )
+            .label("rank"),
+        )
+        .where(FinalScore.game_id == game_id, FinalScore.period_start == period_start)
+        .subquery()
+    )
+    row = (
+        await session.execute(
+            select(FinalScore, ranked.c.rank)
+            .join(ranked, ranked.c.score_id == FinalScore.id)
+            .where(FinalScore.player_id == player_id)
+            .order_by(ranked.c.rank)
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None
+    return row[0], int(row[1])
+
+
 async def get_config_by_id(
     session: AsyncSession, config_version_id: uuid.UUID
 ) -> GameConfigVersion | None:
@@ -228,7 +384,12 @@ async def add_reward_evidence(
     """Append audit and uniquely keyed analytics evidence in the business transaction."""
     evidence = {
         "reward_id": str(reward.id),
-        "outcome_id": str(reward.outcome_id),
+        "outcome_id": str(reward.outcome_id) if reward.outcome_id is not None else None,
+        "settlement_recipient_id": (
+            str(reward.settlement_recipient_id)
+            if reward.settlement_recipient_id is not None
+            else None
+        ),
         "player_id": str(reward.player_id),
         "value": reward.value,
         "status": reward.status.value,
@@ -481,3 +642,64 @@ async def get_fairness_proof_by_outcome(
         select(FairnessProof).where(FairnessProof.outcome_id == outcome_id)
     )
     return proof
+
+
+async def lock_game_by_id(session: AsyncSession, game_id: uuid.UUID) -> Game | None:
+    game: Game | None = await session.scalar(
+        select(Game).where(Game.id == game_id).with_for_update()
+    )
+    return game
+
+
+async def settlement_tier_config(
+    session: AsyncSession, *, game_id: uuid.UUID, period_end: datetime
+) -> RewardTierConfig | None:
+    config: RewardTierConfig | None = await session.scalar(
+        select(RewardTierConfig)
+        .where(
+            RewardTierConfig.game_id == game_id,
+            RewardTierConfig.published_at <= period_end,
+        )
+        .order_by(RewardTierConfig.version.desc())
+        .limit(1)
+    )
+    return config
+
+
+async def settlement_run(
+    session: AsyncSession, *, game_id: uuid.UUID, period_start: datetime
+) -> SettlementRun | None:
+    run: SettlementRun | None = await session.scalar(
+        select(SettlementRun).where(
+            SettlementRun.game_id == game_id,
+            SettlementRun.period_start == period_start,
+        )
+    )
+    return run
+
+
+async def settlement_recipients(
+    session: AsyncSession, run_id: uuid.UUID
+) -> list[SettlementRecipient]:
+    return list(
+        await session.scalars(
+            select(SettlementRecipient)
+            .where(SettlementRecipient.run_id == run_id)
+            .order_by(SettlementRecipient.rank)
+        )
+    )
+
+
+async def add_settlement_reward(session: AsyncSession, recipient: SettlementRecipient) -> Reward:
+    reward = Reward(
+        outcome_id=None,
+        settlement_recipient_id=recipient.id,
+        player_id=recipient.player_id,
+        status=RewardStatus.ISSUED,
+        value=recipient.reward_value,
+        claimed_at=None,
+    )
+    session.add(reward)
+    await session.flush()
+    await session.refresh(reward)
+    return reward

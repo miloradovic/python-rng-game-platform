@@ -126,7 +126,10 @@ class Outcome(Timestamped, Base):
 
 class Reward(Timestamped, Base):
     __tablename__ = "rewards"
-    outcome_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outcomes.id"), unique=True)
+    outcome_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("outcomes.id"), unique=True)
+    settlement_recipient_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("settlement_recipients.id"), unique=True
+    )
     player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id"))
     status: Mapped[RewardStatus] = mapped_column(
         Enum(RewardStatus, name="reward_status", values_callable=lambda e: [x.value for x in e])
@@ -174,6 +177,51 @@ class FinalScore(Timestamped, Base):
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     final_score: Mapped[int] = mapped_column(BigInteger)
+
+
+class RewardTierConfig(Timestamped, Base):
+    """Immutable published leaderboard reward tiers."""
+
+    __tablename__ = "reward_tier_configs"
+    __table_args__ = (UniqueConstraint("game_id", "version", name="uq_reward_tier_config_version"),)
+    game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
+    version: Mapped[int]
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SettlementRun(Timestamped, Base):
+    """One idempotent settlement of a closed game period."""
+
+    __tablename__ = "settlement_runs"
+    __table_args__ = (
+        UniqueConstraint("game_id", "period_start", name="uq_settlement_game_period"),
+    )
+    game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    tier_config_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reward_tier_configs.id", ondelete="RESTRICT")
+    )
+    tier_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(20))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SettlementRecipient(Timestamped, Base):
+    """Durable rank, score, tier, and reward evidence for one recipient."""
+
+    __tablename__ = "settlement_recipients"
+    __table_args__ = (
+        UniqueConstraint("run_id", "player_id", name="uq_settlement_recipient_player"),
+        UniqueConstraint("run_id", "rank", name="uq_settlement_recipient_rank"),
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("settlement_runs.id", ondelete="RESTRICT"))
+    player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id", ondelete="RESTRICT"))
+    score_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("final_scores.id", ondelete="RESTRICT"))
+    rank: Mapped[int]
+    tier_key: Mapped[str] = mapped_column(String(40))
+    reward_value: Mapped[int]
 
 
 class AuditRecord(Timestamped, Base):

@@ -1,13 +1,20 @@
 """Player and catalogue HTTP adapters."""
 
-from datetime import datetime
+import secrets
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import services
+from app import repositories, services
+from app.cache import (
+    parse_leaderboard_member,
+    project_final_score,
+    projected_page,
+    projected_player_rank,
+)
 from app.database import get_session as get_database_session
 from app.models import FairnessProof
 from app.rng import OutcomeProvider
@@ -20,20 +27,27 @@ from app.schemas import (
     FairnessEvaluateResponse,
     FairnessProofResponse,
     FairnessVerificationResponse,
+    FinalScoreCreate,
+    FinalScoreResponse,
     GameConfigResponse,
     GameListResponse,
     GameResponse,
     GameSummaryItem,
     GameSummaryResponse,
+    LeaderboardEntry,
+    LeaderboardResponse,
     OutcomeAuditResponse,
     OutcomeResponse,
     PlayerCreate,
+    PlayerRankResponse,
     PlayerResponse,
     PlayRequest,
     RewardListResponse,
     RewardResponse,
     SessionCreate,
     SessionResponse,
+    SettlementRecipientResponse,
+    SettlementResponse,
 )
 from app.schemas import (
     RewardBand as RewardBandResponse,
@@ -200,6 +214,198 @@ async def get_game_summary(
         start_at=start_at,
         end_at=end_at,
         game_key=game_key,
+    )
+
+
+def _period_start(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise services.InvalidPlayError
+    value = value.astimezone(UTC)
+    if value.weekday() != 0 or any((value.hour, value.minute, value.second, value.microsecond)):
+        raise services.InvalidPlayError
+    return value
+
+
+def _entry(score: object, rank: int) -> LeaderboardEntry:
+    from app.models import FinalScore
+
+    if not isinstance(score, FinalScore):
+        raise TypeError("score must be a FinalScore")
+    return LeaderboardEntry(
+        rank=rank,
+        score_id=score.id,
+        player_id=score.player_id,
+        session_id=score.session_id,
+        final_score=score.final_score,
+        completed_at=score.completed_at,
+    )
+
+
+@router.post(
+    "/leaderboards/{game_key}/settle",
+    response_model=SettlementResponse,
+)
+async def settle_leaderboard(
+    game_key: str,
+    session: Session,
+    request: Request,
+    period_start: Annotated[datetime, Query()],
+    admin_token: Annotated[str | None, Header(alias="X-Settlement-Token")] = None,
+) -> SettlementResponse:
+    configured = request.app.state.settings.settlement_admin_token
+    authorized = (
+        configured is not None
+        and admin_token is not None
+        and secrets.compare_digest(configured.get_secret_value(), admin_token)
+    )
+    run, recipients = await services.settle_leaderboard(
+        session,
+        game_key=game_key,
+        period_start=_period_start(period_start),
+        authorized=authorized,
+    )
+    if run.completed_at is None:
+        raise services.InvalidTransitionError
+    return SettlementResponse(
+        id=run.id,
+        game_key=game_key,
+        period_start=run.period_start,
+        period_end=run.period_end,
+        tier_config_id=run.tier_config_id,
+        status=run.status,
+        completed_at=run.completed_at,
+        recipients=[
+            SettlementRecipientResponse.model_validate(recipient) for recipient in recipients
+        ],
+    )
+
+
+@router.post("/scores", response_model=FinalScoreResponse, status_code=status.HTTP_201_CREATED)
+async def submit_score(
+    body: FinalScoreCreate,
+    session: Session,
+    request: Request,
+    response: Response,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+) -> FinalScoreResponse:
+    score, created = await services.submit_final_score(
+        session, session_id=body.session_id, owner_id=owner_id
+    )
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    else:
+        await project_final_score(getattr(request.app.state, "redis", None), score, "skill_check")
+    return FinalScoreResponse.model_validate(score)
+
+
+@router.get("/leaderboards/{game_key}", response_model=LeaderboardResponse)
+async def get_leaderboard(
+    game_key: str,
+    session: Session,
+    request: Request,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    period_start: Annotated[datetime, Query()],
+    cursor: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> LeaderboardResponse:
+    start = _period_start(period_start)
+    game, database_scores = await services.canonical_leaderboard(
+        session,
+        owner_id=owner_id,
+        game_key=game_key,
+        period_start=start,
+        limit=limit + 1,
+        offset=cursor,
+    )
+    total = await repositories.count_canonical_scores(session, game_id=game.id, period_start=start)
+    projected = await projected_page(
+        getattr(request.app.state, "redis", None),
+        game_key=game_key,
+        period_start=start.strftime("%Y%m%dT%H%M%SZ"),
+        offset=cursor,
+        limit=limit + 1,
+        expected_count=total,
+    )
+    if projected is None:
+        items = [
+            _entry(score, cursor + index + 1) for index, score in enumerate(database_scores[:limit])
+        ]
+        has_more = len(database_scores) > limit
+        source = "postgresql"
+    else:
+        items = []
+        for member, score_value, rank in projected[:limit]:
+            completed_us, session_id, score_id, player_id = parse_leaderboard_member(member)
+            items.append(
+                LeaderboardEntry(
+                    rank=rank,
+                    score_id=UUID(score_id),
+                    player_id=UUID(player_id),
+                    session_id=UUID(session_id),
+                    final_score=score_value,
+                    completed_at=datetime.fromtimestamp(completed_us / 1_000_000, UTC),
+                )
+            )
+        has_more = len(projected) > limit
+        source = "redis"
+    return LeaderboardResponse(
+        game_key=game_key,
+        period_start=start,
+        period_end=start + timedelta(days=7),
+        source=source,
+        items=items,
+        next_cursor=str(cursor + limit) if has_more else None,
+    )
+
+
+@router.get("/players/{player_id}/rank", response_model=PlayerRankResponse)
+async def get_player_rank(
+    player_id: UUID,
+    session: Session,
+    request: Request,
+    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    game_key: Annotated[str, Query(min_length=1, max_length=40)],
+    period_start: Annotated[datetime, Query()],
+) -> PlayerRankResponse:
+    start = _period_start(period_start)
+    score, rank = await services.canonical_player_rank(
+        session,
+        player_id=player_id,
+        owner_id=owner_id,
+        game_key=game_key,
+        period_start=start,
+    )
+    total = await repositories.count_canonical_scores(
+        session, game_id=score.game_id, period_start=start
+    )
+    projected = await projected_player_rank(
+        getattr(request.app.state, "redis", None),
+        game_key=game_key,
+        period_start=start.strftime("%Y%m%dT%H%M%SZ"),
+        player_id=str(player_id),
+        expected_count=total,
+    )
+    if projected is None:
+        entry = _entry(score, rank)
+        source = "postgresql"
+    else:
+        member, score_value, projected_rank_value = projected
+        completed_us, session_id, score_id, projected_player = parse_leaderboard_member(member)
+        entry = LeaderboardEntry(
+            rank=projected_rank_value,
+            score_id=UUID(score_id),
+            player_id=UUID(projected_player),
+            session_id=UUID(session_id),
+            final_score=score_value,
+            completed_at=datetime.fromtimestamp(completed_us / 1_000_000, UTC),
+        )
+        source = "redis"
+    return PlayerRankResponse(
+        game_key=game_key,
+        period_start=start,
+        period_end=start + timedelta(days=7),
+        source=source,
+        entry=entry,
     )
 
 

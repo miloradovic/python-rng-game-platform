@@ -21,7 +21,7 @@ async def test_postgresql_connection_and_foundation_revision() -> None:
     finally:
         await database.dispose()
 
-    assert revision == "0008_fairness_lifecycle_guard"
+    assert revision == "0010_settlements"
 
 
 async def test_real_redis_connection_when_configured() -> None:

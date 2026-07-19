@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     database_url: SecretStr
     redis_url: SecretStr | None = None
     outcome_hmac_secret: SecretStr
+    settlement_admin_token: SecretStr | None = None
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     redis_connect_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
 

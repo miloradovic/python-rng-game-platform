@@ -24,9 +24,14 @@ from app.services import (
     InvalidAnalyticsRangeError,
     InvalidPlayError,
     InvalidTransitionError,
+    LeaderboardEntryNotFoundError,
+    LeaderboardGameIneligibleError,
+    LeaderboardPeriodClosedError,
+    LeaderboardPeriodOpenError,
     NotFoundError,
     RewardUnavailableError,
     SessionExpiredError,
+    SettlementForbiddenError,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +90,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             InvalidPlayError: status.HTTP_422_UNPROCESSABLE_CONTENT,
             InvalidAnalyticsRangeError: status.HTTP_422_UNPROCESSABLE_CONTENT,
             RewardUnavailableError: status.HTTP_409_CONFLICT,
+            LeaderboardEntryNotFoundError: status.HTTP_404_NOT_FOUND,
+            LeaderboardGameIneligibleError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+            LeaderboardPeriodClosedError: status.HTTP_409_CONFLICT,
+            LeaderboardPeriodOpenError: status.HTTP_409_CONFLICT,
+            SettlementForbiddenError: status.HTTP_403_FORBIDDEN,
         }.get(type(error), status.HTTP_400_BAD_REQUEST)
         return JSONResponse(status_code=status_code, content={"error": {"code": error.code}})
 
