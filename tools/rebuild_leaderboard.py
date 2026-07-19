@@ -19,6 +19,10 @@ from app.logging import configure_logging
 logger = logging.getLogger(__name__)
 
 
+class RebuildVerificationError(RuntimeError):
+    """Raised when a disposable projection cannot be proven current."""
+
+
 def _period(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -75,7 +79,7 @@ async def rebuild_leaderboard(
         projected = await client.zrange(target, 0, -1, withscores=True)
         expected = [(member, float(value)) for member, value in map(_mapping, current)]
         if projected != expected:
-            raise RuntimeError("rebuilt projection does not match PostgreSQL")
+            raise RebuildVerificationError("rebuilt projection does not match PostgreSQL")
         return len(current)
     except BaseException:
         await client.delete(temporary)
@@ -104,6 +108,17 @@ async def main() -> None:
             args.period_start,
             count,
         )
+    except RebuildVerificationError as error:
+        # A score can commit in the small interval between catch-up and
+        # verification. Durable state is unaffected; rerunning safely catches
+        # it up and replaces the projection again.
+        logger.error(
+            "leaderboard_rebuild_mismatch game_key=%s period_start=%s reason=%s",
+            args.game_key,
+            args.period_start,
+            error,
+        )
+        raise SystemExit(2) from error
     except RedisError as error:
         logger.error("leaderboard_rebuild_failed reason=redis_unavailable")
         raise SystemExit(1) from error

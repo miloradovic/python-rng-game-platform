@@ -29,7 +29,7 @@ from app.models import (
     SettlementRun,
 )
 from app.rng import HmacOutcomeProvider
-from tools.rebuild_leaderboard import rebuild_leaderboard
+from tools.rebuild_leaderboard import _mapping, rebuild_leaderboard
 from tools.seed import seed_catalogue
 
 pytestmark = pytest.mark.integration
@@ -311,4 +311,69 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
         assert rewards == 1
         assert audits == 1
     finally:
+        await database.dispose()
+
+
+async def test_rebuild_removes_corruption_and_preserves_projection_isolation() -> None:
+    """A target is replaced from PostgreSQL without touching a separate scope."""
+
+    database = Database(get_settings())
+    redis = create_redis_client(get_settings())
+    assert redis is not None
+    player_id = uuid4()
+    try:
+        async with database.session_factory.begin() as session:
+            await seed_catalogue(session)
+            session.add(Player(id=player_id, display_name="Corrupt Projection"))
+        game_session, _ = await _completed_skill_session(database, player_id)
+        async with database.session_factory() as session:
+            score, _ = await services.submit_final_score(
+                session, session_id=game_session.id, owner_id=player_id
+            )
+            period_key = score.period_start.strftime("%Y%m%dT%H%M%SZ")
+            target = leaderboard_key("skill_check", period_key)
+            unrelated = leaderboard_key("daily_spin", period_key)
+            await redis.zadd(target, {"corrupt-member": -1_000_000})
+            await redis.zadd(unrelated, {"unrelated-member": -7})
+            game = await repositories.get_game(session, "skill_check")
+            assert game is not None
+            expected = await repositories.list_canonical_scores(
+                session, game_id=game.id, period_start=score.period_start
+            )
+            assert await rebuild_leaderboard(
+                session, redis, game_key="skill_check", period_start=score.period_start
+            ) == len(expected)
+
+        assert await redis.zrange(target, 0, -1, withscores=True) == [
+            (member, float(value)) for member, value in map(_mapping, expected)
+        ]
+        assert await redis.zrange(unrelated, 0, -1, withscores=True) == [("unrelated-member", -7.0)]
+    finally:
+        await redis.aclose()
+        await database.dispose()
+
+
+async def test_empty_and_concurrent_rebuilds_converge_safely() -> None:
+    """Empty stale keys are removed and simultaneous rebuilds use isolated temps."""
+
+    database = Database(get_settings())
+    redis = create_redis_client(get_settings())
+    assert redis is not None
+    period_start = datetime(2100, 1, 4, tzinfo=UTC)
+    target = leaderboard_key("skill_check", period_start.strftime("%Y%m%dT%H%M%SZ"))
+    try:
+        async with database.session_factory.begin() as session:
+            await seed_catalogue(session)
+        await redis.zadd(target, {"stale-member": -100})
+
+        async def rebuild() -> int:
+            async with database.session_factory() as session:
+                return await rebuild_leaderboard(
+                    session, redis, game_key="skill_check", period_start=period_start
+                )
+
+        assert sorted(await asyncio.gather(rebuild(), rebuild())) == [0, 0]
+        assert await redis.exists(target) == 0
+    finally:
+        await redis.aclose()
         await database.dispose()
