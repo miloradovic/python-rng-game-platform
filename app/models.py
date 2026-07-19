@@ -136,6 +136,46 @@ class Reward(Timestamped, Base):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class FinalScore(Timestamped, Base):
+    """One immutable server-derived leaderboard score for a completed session."""
+
+    __tablename__ = "final_scores"
+    __table_args__ = (
+        UniqueConstraint("session_id", name="uq_final_scores_session"),
+        ForeignKeyConstraint(
+            ["session_id", "player_id", "game_id", "config_version_id"],
+            [
+                "game_sessions.id",
+                "game_sessions.player_id",
+                "game_sessions.game_id",
+                "game_sessions.config_version_id",
+            ],
+            name="fk_final_scores_session_binding",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["outcome_id", "session_id", "config_version_id"],
+            ["outcomes.id", "outcomes.session_id", "outcomes.config_version_id"],
+            name="fk_final_scores_outcome_binding",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("final_score >= 0", name="ck_final_scores_score_nonnegative"),
+        CheckConstraint("final_score <= 1000000", name="ck_final_scores_score_maximum"),
+    )
+    player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id", ondelete="RESTRICT"))
+    game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("game_sessions.id", ondelete="RESTRICT")
+    )
+    outcome_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outcomes.id", ondelete="RESTRICT"))
+    config_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("game_config_versions.id", ondelete="RESTRICT")
+    )
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    final_score: Mapped[int] = mapped_column(BigInteger)
+
+
 class AuditRecord(Timestamped, Base):
     __tablename__ = "audit_records"
     event_type: Mapped[str] = mapped_column(String(80))
