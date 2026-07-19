@@ -281,16 +281,16 @@ async def settle_leaderboard(
     now = clock().astimezone(UTC)
     if now < period_end:
         raise LeaderboardPeriodOpenError
-    config = await repositories.settlement_tier_config(
-        session, game_id=game.id, period_end=period_end
-    )
-    if config is None:
-        raise NotFoundError
-    tiers = config.payload.get("tiers")
-    if not isinstance(tiers, list):
-        raise InvalidPlayError
     run = existing
     if run is None:
+        config = await repositories.settlement_tier_config(
+            session, game_id=game.id, period_end=period_end
+        )
+        if config is None:
+            raise NotFoundError
+        tiers = config.payload.get("tiers")
+        if not isinstance(tiers, list):
+            raise InvalidPlayError
         run = SettlementRun(
             game_id=game.id,
             period_start=period_start,
@@ -302,9 +302,15 @@ async def settle_leaderboard(
         )
         session.add(run)
         await session.flush()
+    else:
+        tiers = run.tier_snapshot.get("tiers")
+        if not isinstance(tiers, list):
+            raise InvalidPlayError
     scores = await repositories.list_canonical_scores(
         session, game_id=game.id, period_start=period_start
     )
+    existing_recipients = await repositories.settlement_recipients(session, run.id)
+    recipients_by_score = {recipient.score_id: recipient for recipient in existing_recipients}
     seen_players: set[uuid.UUID] = set()
     for rank, score in enumerate(scores, start=1):
         if score.player_id in seen_players:
@@ -325,20 +331,25 @@ async def settle_leaderboard(
         key, value = tier.get("key"), tier.get("reward_value")
         if not isinstance(key, str) or not isinstance(value, int) or value < 0:
             raise InvalidPlayError
-        recipient = SettlementRecipient(
-            run_id=run.id,
-            player_id=score.player_id,
-            score_id=score.id,
-            rank=rank,
-            tier_key=key,
-            reward_value=value,
-        )
-        session.add(recipient)
-        await session.flush()
-        reward = await repositories.add_settlement_reward(session, recipient)
-        await repositories.add_reward_evidence(
-            session, reward, event_type="settlement_reward_issued", game_key=game.key
-        )
+        recipient = recipients_by_score.get(score.id)
+        if recipient is None:
+            recipient = SettlementRecipient(
+                run_id=run.id,
+                player_id=score.player_id,
+                score_id=score.id,
+                rank=rank,
+                tier_key=key,
+                reward_value=value,
+            )
+            session.add(recipient)
+            await session.flush()
+            recipients_by_score[score.id] = recipient
+        reward = await repositories.settlement_reward(session, recipient.id)
+        if reward is None:
+            reward = await repositories.add_settlement_reward(session, recipient)
+            await repositories.add_reward_evidence(
+                session, reward, event_type="settlement_reward_issued", game_key=game.key
+            )
         seen_players.add(score.player_id)
     run.status = "completed"
     run.completed_at = now
@@ -352,7 +363,7 @@ async def settle_leaderboard(
                 "game_key": game.key,
                 "period_start": period_start.isoformat(),
                 "period_end": period_end.isoformat(),
-                "tier_config_id": str(config.id),
+                "tier_config_id": str(run.tier_config_id),
                 "recipient_count": len(recipients),
             },
         )

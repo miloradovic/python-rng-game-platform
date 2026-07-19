@@ -690,6 +690,15 @@ async def settlement_recipients(
     )
 
 
+async def settlement_reward(session: AsyncSession, recipient_id: uuid.UUID) -> Reward | None:
+    """Return an existing settlement reward for interruption-safe resumption."""
+
+    reward: Reward | None = await session.scalar(
+        select(Reward).where(Reward.settlement_recipient_id == recipient_id)
+    )
+    return reward
+
+
 async def add_settlement_reward(session: AsyncSession, recipient: SettlementRecipient) -> Reward:
     reward = Reward(
         outcome_id=None,

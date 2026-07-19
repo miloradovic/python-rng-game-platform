@@ -236,7 +236,7 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
 async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() -> None:
     database = Database(get_settings())
     player_id = uuid4()
-    period_start = datetime(2026, 7, 6, tzinfo=UTC)
+    period_start = datetime(2026, 7, 6, tzinfo=UTC) + timedelta(days=7 * (player_id.int % 200))
     try:
         async with database.session_factory.begin() as session:
             await seed_catalogue(session)
@@ -269,16 +269,41 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
             )
             session.add(outcome)
             await session.flush()
+            score = FinalScore(
+                player_id=player_id,
+                game_id=game.id,
+                session_id=game_session.id,
+                outcome_id=outcome.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=game_session.ended_at,
+                final_score=900,
+            )
+            session.add(score)
+            await session.flush()
+            tier_config = await repositories.settlement_tier_config(
+                session, game_id=game.id, period_end=period_start + timedelta(days=7)
+            )
+            assert tier_config is not None
+            run = SettlementRun(
+                game_id=game.id,
+                period_start=period_start,
+                period_end=period_start + timedelta(days=7),
+                tier_config_id=tier_config.id,
+                tier_snapshot=tier_config.payload,
+                status="processing",
+                completed_at=None,
+            )
+            session.add(run)
+            await session.flush()
             session.add(
-                FinalScore(
+                SettlementRecipient(
+                    run_id=run.id,
                     player_id=player_id,
-                    game_id=game.id,
-                    session_id=game_session.id,
-                    outcome_id=outcome.id,
-                    config_version_id=config.id,
-                    period_start=period_start,
-                    completed_at=game_session.ended_at,
-                    final_score=900,
+                    score_id=score.id,
+                    rank=1,
+                    tier_key="champion",
+                    reward_value=500,
                 )
             )
 
@@ -298,7 +323,7 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
             rewards = await session.scalar(
                 select(func.count())
                 .select_from(Reward)
-                .where(Reward.settlement_recipient_id.is_not(None))
+                .where(Reward.settlement_recipient_id == results[0][1][0].id)
             )
             audits = await session.scalar(
                 select(func.count())
