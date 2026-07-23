@@ -80,14 +80,19 @@ async def get_active_config(session: AsyncSession, game_id: uuid.UUID) -> GameCo
 
 
 async def get_session_by_request(
-    session: AsyncSession, player_id: uuid.UUID, request_id: uuid.UUID
+    session: AsyncSession, request_id: uuid.UUID
 ) -> GameSession | None:
     game_session: GameSession | None = await session.scalar(
-        select(GameSession).where(
-            GameSession.player_id == player_id, GameSession.request_id == request_id
-        )
+        select(GameSession).where(GameSession.request_id == request_id)
     )
     return game_session
+
+
+async def lock_session_request_id(session: AsyncSession, request_id: uuid.UUID) -> None:
+    """Serialize globally scoped session idempotency keys across different players."""
+
+    lock_key = int.from_bytes(request_id.bytes[:8], byteorder="big", signed=True)
+    await session.scalar(select(func.pg_advisory_xact_lock(lock_key)))
 
 
 async def expire_active_sessions(
@@ -125,6 +130,7 @@ async def add_session(
     player_id: uuid.UUID,
     game_id: uuid.UUID,
     config_version_id: uuid.UUID,
+    request_fingerprint: str,
     expires_at: datetime,
     challenge: dict[str, object],
 ) -> GameSession:
@@ -133,6 +139,7 @@ async def add_session(
         player_id=player_id,
         game_id=game_id,
         config_version_id=config_version_id,
+        request_fingerprint=request_fingerprint,
         status=SessionStatus.ACTIVE,
         expires_at=expires_at,
         ended_at=None,
@@ -626,6 +633,19 @@ async def lock_latest_fairness_proof_event(
     return event
 
 
+async def list_fairness_proof_events(
+    session: AsyncSession, proof_id: uuid.UUID
+) -> list[FairnessProofEvent]:
+    """Load a proof's append-only lifecycle chain in verification order."""
+
+    events = await session.scalars(
+        select(FairnessProofEvent)
+        .where(FairnessProofEvent.proof_id == proof_id)
+        .order_by(FairnessProofEvent.sequence)
+    )
+    return list(events)
+
+
 async def lock_fairness_proof(session: AsyncSession, proof_id: uuid.UUID) -> FairnessProof | None:
     """Lock one proof by its public identifier."""
 
@@ -633,6 +653,23 @@ async def lock_fairness_proof(session: AsyncSession, proof_id: uuid.UUID) -> Fai
         select(FairnessProof).where(FairnessProof.id == proof_id).with_for_update()
     )
     return proof
+
+
+async def get_fairness_proof(
+    session: AsyncSession, proof_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID] | None:
+    """Load one proof for authorization before acquiring lifecycle locks in order."""
+
+    row = (
+        await session.execute(
+            select(FairnessProof.player_id, FairnessProof.session_id).where(
+                FairnessProof.id == proof_id
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    return row.player_id, row.session_id
 
 
 async def get_fairness_proof_by_outcome(

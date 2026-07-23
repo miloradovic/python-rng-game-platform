@@ -33,18 +33,31 @@ async def test_all_games_persist_one_config_bound_outcome_and_audit() -> None:
                     owner_id=player_id,
                     game_key=game_key,
                 )
-                choice = "red" if game_key == "prediction_card" else None
-                actions = (
-                    list(game_session.challenge["sequence"]) if game_key == "skill_check" else None
-                )
-                outcome = await services.play_session(
-                    session,
-                    session_id=game_session.id,
-                    owner_id=player_id,
-                    choice=choice,
-                    actions=actions,
-                    provider=provider,
-                )
+                if game_key == "daily_spin":
+                    proof = await services.commit_fairness(
+                        session, session_id=game_session.id, owner_id=player_id
+                    )
+                    outcome, _, _ = await services.evaluate_fairness(
+                        session,
+                        proof_id=proof.id,
+                        owner_id=player_id,
+                        client_seed="integration-client-seed",
+                    )
+                else:
+                    choice = "red" if game_key == "prediction_card" else None
+                    actions = (
+                        list(game_session.challenge["sequence"])
+                        if game_key == "skill_check"
+                        else None
+                    )
+                    outcome = await services.play_session(
+                        session,
+                        session_id=game_session.id,
+                        owner_id=player_id,
+                        choice=choice,
+                        actions=actions,
+                        provider=provider,
+                    )
                 assert outcome.config_version_id == game_session.config_version_id
                 assert game_session.status == SessionStatus.COMPLETED
                 reward = await services.claim_session_reward(

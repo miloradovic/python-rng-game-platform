@@ -23,6 +23,9 @@ async def test_create_session_retry_commits_once_without_repeating_the_command(
         id=uuid4(),
         request_id=uuid4(),
         player_id=player_id,
+        request_fingerprint=services._request_fingerprint(
+            "create_session", {"player_id": str(player_id), "game_key": "skill_check"}
+        ),
         game_id=uuid4(),
         config_version_id=uuid4(),
         status=SessionStatus.ACTIVE,
@@ -80,21 +83,6 @@ async def test_retrieve_session_never_commits_even_when_reporting_effective_expi
 @pytest.mark.parametrize(
     ("game_key", "payload", "choice", "actions", "challenge", "result_key"),
     [
-        (
-            "daily_spin",
-            {
-                "game_type": "daily_spin",
-                "cooldown_seconds": 86400,
-                "rewards": [
-                    {"key": "coins", "weight": 1, "value": 10},
-                    {"key": "bonus", "weight": 1, "value": 20},
-                ],
-            },
-            None,
-            None,
-            {},
-            "reward_key",
-        ),
         (
             "prediction_card",
             {

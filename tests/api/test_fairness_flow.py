@@ -66,6 +66,7 @@ async def test_daily_spin_commit_and_evaluate_are_authorized_and_idempotent() ->
                 f"/api/v1/sessions/{session_id}/play", headers=headers, json={}
             )
             assert bypass_attempt.status_code == 409
+            assert bypass_attempt.json()["error"]["code"] == "daily_spin_fairness_required"
             assert "server_seed" not in bypass_attempt.text
 
             evaluated = await client.post(
@@ -79,7 +80,8 @@ async def test_daily_spin_commit_and_evaluate_are_authorized_and_idempotent() ->
                 json={"proof_id": committed.json()["proof_id"], "client_seed": "changed-seed"},
             )
             assert evaluated.status_code == 200
-            assert retried_evaluation.json() == evaluated.json()
+            assert retried_evaluation.status_code == 409
+            assert retried_evaluation.json()["error"]["code"] == "idempotency_conflict"
             assert evaluated.json()["status"] == "revealed"
             assert evaluated.json()["outcome"]["result"]["reward_key"]
             assert "server_seed" not in evaluated.json()

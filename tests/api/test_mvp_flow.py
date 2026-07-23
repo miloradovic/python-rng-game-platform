@@ -54,19 +54,41 @@ async def test_complete_mvp_flow_for_every_game() -> None:
                 assert created.status_code == 201
                 assert created.json()["config_version_id"] == config.json()["id"]
 
-                if game_key == "prediction_card":
+                if game_key == "daily_spin":
+                    committed = await client.post(
+                        "/api/v1/fairness/commit",
+                        headers=headers,
+                        json={"session_id": created.json()["id"]},
+                    )
+                    evaluated = await client.post(
+                        "/api/v1/fairness/evaluate",
+                        headers=headers,
+                        json={
+                            "proof_id": committed.json()["proof_id"],
+                            "client_seed": "mvp-client-seed",
+                        },
+                    )
+                    assert evaluated.status_code == 200
+                    played_json = evaluated.json()["outcome"]
+                elif game_key == "prediction_card":
                     play_body = {"choice": "red"}
-                elif game_key == "skill_check":
-                    play_body = {"actions": created.json()["challenge"]["sequence"]}
+                    played = await client.post(
+                        f"/api/v1/sessions/{created.json()['id']}/play",
+                        headers=headers,
+                        json=play_body,
+                    )
+                    assert played.status_code == 200
+                    played_json = played.json()
                 else:
-                    play_body = {}
-                played = await client.post(
-                    f"/api/v1/sessions/{created.json()['id']}/play",
-                    headers=headers,
-                    json=play_body,
-                )
-                assert played.status_code == 200
-                assert played.json()["config_version_id"] == config.json()["id"]
+                    play_body = {"actions": created.json()["challenge"]["sequence"]}
+                    played = await client.post(
+                        f"/api/v1/sessions/{created.json()['id']}/play",
+                        headers=headers,
+                        json=play_body,
+                    )
+                    assert played.status_code == 200
+                    played_json = played.json()
+                assert played_json["config_version_id"] == config.json()["id"]
 
                 claimed = await client.post(
                     f"/api/v1/sessions/{created.json()['id']}/claim",
@@ -84,19 +106,19 @@ async def test_complete_mvp_flow_for_every_game() -> None:
                     values = {
                         band["key"]: band["value"] for band in config.json()["payload"]["rewards"]
                     }
-                    assert claimed.json()["value"] == values[played.json()["result"]["reward_key"]]
+                    assert claimed.json()["value"] == values[played_json["result"]["reward_key"]]
                 elif game_key == "prediction_card":
                     expected = (
                         config.json()["payload"]["correct_reward"]
-                        if played.json()["result"]["correct"]
+                        if played_json["result"]["correct"]
                         else 0
                     )
                     assert claimed.json()["value"] == expected
                 else:
-                    assert claimed.json()["value"] == played.json()["result"]["score"]
+                    assert claimed.json()["value"] == played_json["result"]["score"]
 
                 audit = await client.get(
-                    f"/api/v1/audit/outcomes/{played.json()['id']}", headers=headers
+                    f"/api/v1/audit/outcomes/{played_json['id']}", headers=headers
                 )
                 rewards = await client.get(f"/api/v1/players/{player_id}/rewards", headers=headers)
                 summary = await client.get(

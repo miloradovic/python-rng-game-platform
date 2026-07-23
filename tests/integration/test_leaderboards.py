@@ -256,6 +256,7 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
                 game_id=game.id,
                 config_version_id=config.id,
                 request_id=uuid4(),
+                request_fingerprint="a" * 64,
                 status=SessionStatus.COMPLETED,
                 expires_at=period_start + timedelta(days=2),
                 ended_at=period_start + timedelta(days=1),

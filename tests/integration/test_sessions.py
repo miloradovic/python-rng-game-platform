@@ -42,6 +42,29 @@ async def test_session_binds_published_config_and_retry_is_idempotent() -> None:
             )
         assert first.id == retried.id
         assert first.config_version_id == retried.config_version_id
+
+        async with database.session_factory() as session:
+            with pytest.raises(services.IdempotencyConflictError):
+                await services.create_session(
+                    session,
+                    request_id=request_id,
+                    player_id=player_id,
+                    owner_id=player_id,
+                    game_key="prediction_card",
+                )
+
+        other_player_id = uuid4()
+        async with database.session_factory.begin() as session:
+            session.add(Player(id=other_player_id, display_name="Other Request Owner"))
+        async with database.session_factory() as session:
+            with pytest.raises(services.IdempotencyConflictError):
+                await services.create_session(
+                    session,
+                    request_id=request_id,
+                    player_id=other_player_id,
+                    owner_id=other_player_id,
+                    game_key="skill_check",
+                )
     finally:
         await database.dispose()
 

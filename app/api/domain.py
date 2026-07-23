@@ -2,7 +2,7 @@
 
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, cast
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
@@ -16,7 +16,6 @@ from app.cache import (
     projected_player_rank,
 )
 from app.database import get_session as get_database_session
-from app.models import FairnessProof
 from app.rng import OutcomeProvider
 from app.rng import RewardBand as FairnessRewardBand
 from app.schemas import (
@@ -448,19 +447,19 @@ async def evaluate_fairness(
 
 
 def _fairness_proof_response(
-    proof: FairnessProof, reward_bands: tuple[FairnessRewardBand, ...]
+    proof: services.RevealedFairnessProof, reward_bands: tuple[FairnessRewardBand, ...]
 ) -> FairnessProofResponse:
     """Translate service-validated finalized evidence for the HTTP boundary."""
 
     return FairnessProofResponse(
-        proof_id=proof.id,
-        outcome_id=cast(UUID, proof.outcome_id),
+        proof_id=proof.proof_id,
+        outcome_id=proof.outcome_id,
         status=proof.status.value,
         protocol_version=proof.protocol_version,
         algorithm=proof.algorithm,
         server_seed_commitment=proof.server_seed_commitment,
-        server_seed_revealed=cast(str, proof.server_seed_revealed),
-        client_seed=cast(str, proof.client_seed),
+        server_seed_revealed=proof.server_seed_revealed,
+        client_seed=proof.client_seed,
         nonce=proof.nonce,
         game_key=proof.game_key,
         session_id=proof.session_id,
@@ -471,12 +470,12 @@ def _fairness_proof_response(
             RewardBandResponse(key=band.key, weight=band.weight, value=band.value)
             for band in reward_bands
         ],
-        raw_random_value=cast(str, proof.raw_random_value),
-        normalized_value=cast(int, proof.normalized_value),
-        derivation_attempt=cast(int, proof.derivation_attempt),
-        reward_key=cast(str, proof.reward_key),
-        reward_value=cast(int, proof.reward_value),
-        revealed_at=cast(datetime, proof.revealed_at),
+        raw_random_value=proof.raw_random_value,
+        normalized_value=proof.normalized_value,
+        derivation_attempt=proof.derivation_attempt,
+        reward_key=proof.reward_key,
+        reward_value=proof.reward_value,
+        revealed_at=proof.revealed_at,
     )
 
 

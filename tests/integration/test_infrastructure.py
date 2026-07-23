@@ -10,7 +10,7 @@ from app.database import Database
 pytestmark = pytest.mark.integration
 
 
-async def test_postgresql_connection_and_foundation_revision() -> None:
+async def test_postgresql_connection_and_current_revision() -> None:
     """PostgreSQL is reachable and reports the applied reviewed migration."""
 
     database = Database(get_settings())
@@ -21,7 +21,7 @@ async def test_postgresql_connection_and_foundation_revision() -> None:
     finally:
         await database.dispose()
 
-    assert revision == "0011_persistence_integrity"
+    assert revision == "0012_fairness_idempotency"
 
 
 async def test_real_redis_connection_when_configured() -> None:

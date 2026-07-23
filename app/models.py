@@ -63,11 +63,9 @@ class FairnessProofStatus(StrEnum):
     """Durable lifecycle states for a protocol-versioned fairness proof."""
 
     COMMITTED = "committed"
-    EVALUATED = "evaluated"
     REVEALED = "revealed"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
-    FAILED = "failed"
 
 
 class Timestamped:
@@ -131,7 +129,7 @@ class GameConfigVersion(Timestamped, Base):
 class GameSession(Timestamped, Base):
     __tablename__ = "game_sessions"
     __table_args__ = (
-        UniqueConstraint("player_id", "request_id", name="uq_session_player_request"),
+        UniqueConstraint("request_id", name="uq_session_request"),
         UniqueConstraint(
             "id",
             "player_id",
@@ -150,6 +148,10 @@ class GameSession(Timestamped, Base):
             "OR (status <> 'active' AND ended_at IS NOT NULL)",
             name="ck_session_terminal_ended_at",
         ),
+        CheckConstraint(
+            "request_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_session_request_fingerprint_hex",
+        ),
         Index("ix_sessions_player_created", "player_id", "created_at"),
         Index(
             "uq_active_session_player_game",
@@ -163,6 +165,7 @@ class GameSession(Timestamped, Base):
     game_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     config_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
     status: Mapped[SessionStatus] = mapped_column(
         Enum(SessionStatus, name="session_status", values_callable=lambda e: [x.value for x in e])
     )
@@ -460,21 +463,23 @@ class FairnessProof(Timestamped, Base):
             name="ck_fairness_proof_revealed_seed_hex",
         ),
         CheckConstraint(
+            "evaluation_fingerprint IS NULL OR evaluation_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_fairness_proof_evaluation_fingerprint_hex",
+        ),
+        CheckConstraint(
             "(status = 'committed' AND outcome_id IS NULL AND client_seed IS NULL "
+            "AND evaluation_fingerprint IS NULL "
             "AND raw_random_value IS NULL AND normalized_value IS NULL "
             "AND derivation_attempt IS NULL AND reward_key IS NULL AND reward_value IS NULL "
             "AND evaluated_at IS NULL AND server_seed_revealed IS NULL AND revealed_at IS NULL) "
-            "OR (status = 'evaluated' AND outcome_id IS NOT NULL AND client_seed IS NOT NULL "
-            "AND raw_random_value IS NOT NULL AND normalized_value IS NOT NULL "
-            "AND derivation_attempt IS NOT NULL AND reward_key IS NOT NULL "
-            "AND reward_value IS NOT NULL AND evaluated_at IS NOT NULL "
-            "AND server_seed_revealed IS NULL AND revealed_at IS NULL) "
             "OR (status = 'revealed' AND outcome_id IS NOT NULL AND client_seed IS NOT NULL "
+            "AND evaluation_fingerprint IS NOT NULL "
             "AND raw_random_value IS NOT NULL AND normalized_value IS NOT NULL "
             "AND derivation_attempt IS NOT NULL AND reward_key IS NOT NULL "
             "AND reward_value IS NOT NULL AND evaluated_at IS NOT NULL "
             "AND server_seed_revealed IS NOT NULL AND revealed_at IS NOT NULL) "
-            "OR (status IN ('expired', 'cancelled', 'failed') AND outcome_id IS NULL "
+            "OR (status IN ('expired', 'cancelled') AND outcome_id IS NULL "
+            "AND client_seed IS NULL AND evaluation_fingerprint IS NULL "
             "AND raw_random_value IS NULL AND normalized_value IS NULL "
             "AND derivation_attempt IS NULL AND reward_key IS NULL AND reward_value IS NULL "
             "AND evaluated_at IS NULL AND server_seed_revealed IS NULL AND revealed_at IS NULL)",
@@ -501,6 +506,7 @@ class FairnessProof(Timestamped, Base):
     server_seed_commitment: Mapped[str] = mapped_column(String(64))
     nonce: Mapped[int] = mapped_column(BigInteger)
     client_seed: Mapped[str | None] = mapped_column(String(64))
+    evaluation_fingerprint: Mapped[str | None] = mapped_column(String(64))
     mapping_version: Mapped[str] = mapped_column(String(80))
     mapping_digest: Mapped[str] = mapped_column(String(64))
     raw_random_value: Mapped[str | None] = mapped_column(String(64))
@@ -553,6 +559,8 @@ class FairnessProofEvent(Timestamped, Base):
     )
     sequence: Mapped[int]
     event_type: Mapped[str] = mapped_column(String(40))
+    evidence_version: Mapped[int]
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     status: Mapped[FairnessProofStatus] = mapped_column(
         Enum(
             FairnessProofStatus,
