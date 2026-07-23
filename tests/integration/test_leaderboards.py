@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import UUID, uuid4
 
 import httpx
@@ -90,6 +91,12 @@ async def test_score_submission_is_server_derived_and_evidenced() -> None:
                 .select_from(AnalyticsEvent)
                 .where(AnalyticsEvent.event_key == f"final_score_submitted:{score.id}")
             )
+            projection_revision = await repositories.leaderboard_projection_revision(
+                session, game_id=score.game_id, period_start=score.period_start
+            )
+            period_score_count = await repositories.count_canonical_scores(
+                session, game_id=score.game_id, period_start=score.period_start
+            )
 
         assert created is True
         assert retry_created is False
@@ -99,6 +106,7 @@ async def test_score_submission_is_server_derived_and_evidenced() -> None:
         assert score.period_start.weekday() == 0
         assert audit_count == 1
         assert event_count == 1
+        assert projection_revision == period_score_count
     finally:
         await database.dispose()
 
@@ -222,6 +230,15 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
                     game_key="skill_check",
                     period_start=datetime.fromisoformat(period_start).astimezone(UTC),
                 )
+            projected_page = await client.get(
+                "/api/v1/leaderboards/skill_check",
+                headers=headers,
+                params={"period_start": period_start},
+            )
+            assert projected_page.status_code == 200
+            assert projected_page.json()["source"] == "redis"
+            assert projected_page.json()["items"] == fallback.json()["items"]
+            assert projected_page.json()["next_cursor"] == fallback.json()["next_cursor"]
             projected = await client.get(
                 f"/api/v1/players/{player_id}/rank",
                 headers=headers,
@@ -230,6 +247,32 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
             assert projected.status_code == 200
             assert projected.json()["source"] == "redis"
             assert projected.json()["entry"]["score_id"] == created.json()["id"]
+
+            # Preserve cardinality and metadata while corrupting the sole member.
+            projected_rows = cast(
+                list[tuple[str, float]], await redis.zrange(key, 0, 0, withscores=True)
+            )
+            member, redis_score = projected_rows[0]
+            await redis.zrem(key, member)
+            await redis.zadd(key, {"corrupt:member:with:same-cardinality": redis_score})
+            corrupted = await client.get(
+                "/api/v1/leaderboards/skill_check",
+                headers=headers,
+                params={"period_start": period_start},
+            )
+            assert corrupted.status_code == 200
+            assert corrupted.json()["source"] == "postgresql"
+            assert any(
+                item["score_id"] == created.json()["id"] for item in corrupted.json()["items"]
+            )
+            await redis.zadd(key, {"extra:corrupt:member:value": -1})
+            extra = await client.get(
+                "/api/v1/leaderboards/skill_check",
+                headers=headers,
+                params={"period_start": period_start},
+            )
+            assert extra.status_code == 200
+            assert extra.json()["source"] == "postgresql"
     finally:
         await redis.aclose()
         await database.dispose()
@@ -427,6 +470,87 @@ async def test_empty_and_concurrent_rebuilds_converge_safely() -> None:
 
         assert sorted(await asyncio.gather(rebuild(), rebuild())) == [0, 0]
         assert await redis.exists(target) == 0
+    finally:
+        await redis.aclose()
+        await database.dispose()
+
+
+async def test_concurrent_rebuild_score_commit_and_read_preserve_canonical_results() -> None:
+    """A racing generation is either validated or ignored, never partially trusted."""
+
+    database = Database(get_settings())
+    redis = create_redis_client(get_settings())
+    assert redis is not None
+    first_player, second_player = uuid4(), uuid4()
+    try:
+        async with database.session_factory.begin() as session:
+            await seed_catalogue(session)
+            session.add_all(
+                [
+                    Player(id=first_player, display_name="Concurrent Reader"),
+                    Player(id=second_player, display_name="Concurrent Writer"),
+                ]
+            )
+        first_session, _ = await _completed_skill_session(database, first_player)
+        second_session, _ = await _completed_skill_session(database, second_player)
+        async with database.session_factory() as session:
+            first_score, _ = await services.submit_final_score(
+                session, session_id=first_session.id, owner_id=first_player
+            )
+            await rebuild_leaderboard(
+                session,
+                redis,
+                game_key="skill_check",
+                period_start=first_score.period_start,
+            )
+
+        application = create_app(get_settings())
+
+        async def override_session() -> AsyncIterator[AsyncSession]:
+            async with database.session_factory() as session:
+                yield session
+
+        application.dependency_overrides[get_session] = override_session
+        application.state.redis = redis
+        period = first_score.period_start.isoformat()
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application), base_url="http://test"
+        ) as client:
+
+            async def rebuild() -> int:
+                async with database.session_factory() as session:
+                    return await rebuild_leaderboard(
+                        session,
+                        redis,
+                        game_key="skill_check",
+                        period_start=first_score.period_start,
+                    )
+
+            submit, _, racing_read = await asyncio.gather(
+                client.post(
+                    "/api/v1/scores",
+                    headers={"X-Player-ID": str(second_player)},
+                    json={"session_id": str(second_session.id)},
+                ),
+                rebuild(),
+                client.get(
+                    "/api/v1/leaderboards/skill_check",
+                    headers={"X-Player-ID": str(first_player)},
+                    params={"period_start": period},
+                ),
+            )
+            final_read = await client.get(
+                "/api/v1/leaderboards/skill_check",
+                headers={"X-Player-ID": str(first_player)},
+                params={"period_start": period},
+            )
+
+        assert submit.status_code == 201
+        assert racing_read.status_code == 200
+        assert final_read.status_code == 200
+        durable_ids = {first_score.id, UUID(submit.json()["id"])}
+        returned_ids = {UUID(item["score_id"]) for item in final_read.json()["items"]}
+        assert durable_ids <= returned_ids
     finally:
         await redis.aclose()
         await database.dispose()

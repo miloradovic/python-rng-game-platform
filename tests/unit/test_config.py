@@ -55,3 +55,32 @@ def test_settings_require_outcome_hmac_secret(monkeypatch: pytest.MonkeyPatch) -
             _env_file=None,
             database_url="postgresql+asyncpg://user:password@db:5432/database",
         )
+
+
+def test_production_rejects_development_credentials_and_transport() -> None:
+    """Production cannot start with Compose defaults or plaintext Redis."""
+
+    with pytest.raises(ValidationError, match="ssl=require"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            database_url="postgresql+asyncpg://rng_app:local-password@db/database",
+            redis_url="redis://redis/0",
+            outcome_hmac_secret="development-only-outcome-key-32-bytes-minimum",  # noqa: S106
+            settlement_admin_token="development-only-settlement-token",  # noqa: S106
+        )
+
+
+def test_production_accepts_explicit_secure_configuration() -> None:
+    """Production validation accepts encrypted connections and non-default secrets."""
+
+    settings = Settings(
+        _env_file=None,
+        app_env="production",
+        database_url="postgresql+asyncpg://rng_app:strong-password@db/database?ssl=require",
+        redis_url="rediss://redis/0",
+        outcome_hmac_secret="o" * 32,
+        settlement_admin_token="s" * 32,
+    )
+
+    assert settings.app_env is AppEnvironment.PRODUCTION

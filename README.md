@@ -23,7 +23,6 @@ Only Docker and Docker Compose are required on the host.
 
 ```console
 docker compose up --build -d
-docker compose run --rm app alembic upgrade head
 docker compose run --rm app python -m tools.seed
 docker compose ps
 ```

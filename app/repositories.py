@@ -18,6 +18,7 @@ from app.models import (
     Game,
     GameConfigVersion,
     GameSession,
+    LeaderboardProjectionRevision,
     Outcome,
     OutcomeStatus,
     Player,
@@ -279,6 +280,20 @@ async def count_canonical_scores(
         .where(FinalScore.game_id == game_id, FinalScore.period_start == period_start)
     )
     return int(count or 0)
+
+
+async def leaderboard_projection_revision(
+    session: AsyncSession, *, game_id: uuid.UUID, period_start: datetime
+) -> int:
+    """Return the durable generation for one game period."""
+
+    revision = await session.scalar(
+        select(LeaderboardProjectionRevision.revision).where(
+            LeaderboardProjectionRevision.game_id == game_id,
+            LeaderboardProjectionRevision.period_start == period_start,
+        )
+    )
+    return int(revision or 0)
 
 
 async def player_canonical_rank(

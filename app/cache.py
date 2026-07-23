@@ -3,9 +3,7 @@
 from typing import Any, cast
 
 from redis.asyncio import Redis
-from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
-from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.config import Settings
 
@@ -30,13 +28,19 @@ async def redis_is_available(client: Redis | None) -> bool | None:
         return None
     try:
         return bool(await client.ping())
-    except RedisConnectionError, RedisTimeoutError:
+    except RedisError:
         return False
 
 
 def leaderboard_key(game_key: str, period_start: str) -> str:
     """Return the isolated sorted-set key for one game and ISO-week."""
     return f"leaderboard:v1:{game_key}:{period_start}"
+
+
+def leaderboard_metadata_key(game_key: str, period_start: str) -> str:
+    """Return projection metadata isolated with the sorted set generation."""
+
+    return f"{leaderboard_key(game_key, period_start)}:metadata"
 
 
 def leaderboard_member(
@@ -68,7 +72,10 @@ async def project_final_score(client: Redis | None, score: object, game_key: str
         player_id=str(score.player_id),
     )
     try:
-        await client.zadd(leaderboard_key(game_key, period), {member: -score.final_score})
+        async with client.pipeline(transaction=True) as pipeline:
+            pipeline.zadd(leaderboard_key(game_key, period), {member: -score.final_score})
+            pipeline.delete(leaderboard_metadata_key(game_key, period))
+            await pipeline.execute()
     except RedisError:
         return False
     return True
@@ -82,13 +89,25 @@ async def projected_page(
     offset: int,
     limit: int,
     expected_count: int,
+    expected_revision: int,
 ) -> list[tuple[str, int, int]] | None:
-    """Read a projection only when its member count matches PostgreSQL."""
+    """Read a projection only when its generation matches PostgreSQL."""
     if client is None:
         return None
     key = leaderboard_key(game_key, period_start)
     try:
-        if await client.zcard(key) != expected_count:
+        async with client.pipeline(transaction=False) as pipeline:
+            pipeline.hgetall(leaderboard_metadata_key(game_key, period_start))
+            pipeline.zcard(key)
+            metadata, cardinality = await pipeline.execute()
+        if (
+            metadata
+            != {
+                "revision": str(expected_revision),
+                "count": str(expected_count),
+            }
+            or cardinality != expected_count
+        ):
             return None
         rows = cast(
             list[tuple[str, float]],
@@ -106,13 +125,25 @@ async def projected_player_rank(
     period_start: str,
     player_id: str,
     expected_count: int,
+    expected_revision: int,
 ) -> tuple[str, int, int] | None:
     """Return a projected member only when the complete projection is current."""
     if client is None:
         return None
     key = leaderboard_key(game_key, period_start)
     try:
-        if await client.zcard(key) != expected_count:
+        async with client.pipeline(transaction=False) as pipeline:
+            pipeline.hgetall(leaderboard_metadata_key(game_key, period_start))
+            pipeline.zcard(key)
+            metadata, cardinality = await pipeline.execute()
+        if (
+            metadata
+            != {
+                "revision": str(expected_revision),
+                "count": str(expected_count),
+            }
+            or cardinality != expected_count
+        ):
             return None
         async for member, score in client.zscan_iter(key):
             if parse_leaderboard_member(member)[3] == player_id:

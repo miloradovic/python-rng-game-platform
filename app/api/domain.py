@@ -1,21 +1,26 @@
 """Player and catalogue HTTP adapters."""
 
-import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import repositories, services
-from app.cache import (
-    parse_leaderboard_member,
-    project_final_score,
-    projected_page,
-    projected_player_rank,
+from app import services
+from app.api.dependencies import (
+    authorize_settlement,
+    get_metrics,
+    get_outcome_provider,
+    get_player_id,
+    get_projection_reader,
+    get_redis,
 )
+from app.cache import project_final_score
 from app.database import get_session as get_database_session
+from app.leaderboard_projection import LeaderboardProjectionReader
+from app.observability import MetricsRegistry
 from app.rng import OutcomeProvider
 from app.rng import RewardBand as FairnessRewardBand
 from app.schemas import (
@@ -33,7 +38,6 @@ from app.schemas import (
     GameResponse,
     GameSummaryItem,
     GameSummaryResponse,
-    LeaderboardEntry,
     LeaderboardResponse,
     OutcomeAuditResponse,
     OutcomeResponse,
@@ -54,6 +58,12 @@ from app.schemas import (
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_database_session)]
+OwnerId = Annotated[UUID, Depends(get_player_id)]
+Provider = Annotated[OutcomeProvider, Depends(get_outcome_provider)]
+ProjectionReader = Annotated[LeaderboardProjectionReader, Depends(get_projection_reader)]
+RedisClient = Annotated[Redis | None, Depends(get_redis)]
+SettlementAuthorized = Annotated[bool, Depends(authorize_settlement)]
+Metrics = Annotated[MetricsRegistry, Depends(get_metrics)]
 
 
 @router.post("/players", response_model=PlayerResponse, status_code=status.HTTP_201_CREATED)
@@ -65,7 +75,7 @@ async def create_player(body: PlayerCreate, session: Session) -> PlayerResponse:
 async def get_player(
     player_id: UUID,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> PlayerResponse:
     return PlayerResponse.model_validate(
         await services.retrieve_player(session, player_id, owner_id)
@@ -93,7 +103,7 @@ async def get_active_config(game_key: str, session: Session) -> GameConfigRespon
 async def create_session(
     body: SessionCreate,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> SessionResponse:
     game_session = await services.create_session(
         session,
@@ -109,7 +119,7 @@ async def create_session(
 async def get_session(
     session_id: UUID,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> SessionResponse:
     return SessionResponse.model_validate(
         await services.retrieve_session(session, session_id, owner_id)
@@ -120,7 +130,7 @@ async def get_session(
 async def cancel_session(
     session_id: UUID,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> SessionResponse:
     return SessionResponse.model_validate(
         await services.cancel_session(session, session_id, owner_id)
@@ -132,10 +142,9 @@ async def play_session(
     session_id: UUID,
     body: PlayRequest,
     session: Session,
-    request: Request,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    provider: Provider,
+    owner_id: OwnerId,
 ) -> OutcomeResponse:
-    provider: OutcomeProvider = request.app.state.outcome_provider
     outcome = await services.play_session(
         session,
         session_id=session_id,
@@ -152,7 +161,7 @@ async def claim_session_reward(
     session_id: UUID,
     body: ClaimRequest,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> RewardResponse:
     reward = await services.claim_session_reward(session, session_id=session_id, owner_id=owner_id)
     del body
@@ -163,7 +172,7 @@ async def claim_session_reward(
 async def list_player_rewards(
     player_id: UUID,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> RewardListResponse:
@@ -181,7 +190,7 @@ async def list_player_rewards(
 async def get_outcome_audit(
     outcome_id: UUID,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> OutcomeAuditResponse:
     outcome, evidence = await services.retrieve_outcome_audit(session, outcome_id, owner_id)
     return OutcomeAuditResponse(outcome=OutcomeResponse.model_validate(outcome), evidence=evidence)
@@ -190,7 +199,7 @@ async def get_outcome_audit(
 @router.get("/analytics/game-summary", response_model=GameSummaryResponse)
 async def get_game_summary(
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
     start_at: Annotated[datetime | None, Query()] = None,
     end_at: Annotated[datetime | None, Query()] = None,
     game_key: Annotated[
@@ -225,21 +234,6 @@ def _period_start(value: datetime) -> datetime:
     return value
 
 
-def _entry(score: object, rank: int) -> LeaderboardEntry:
-    from app.models import FinalScore
-
-    if not isinstance(score, FinalScore):
-        raise TypeError("score must be a FinalScore")
-    return LeaderboardEntry(
-        rank=rank,
-        score_id=score.id,
-        player_id=score.player_id,
-        session_id=score.session_id,
-        final_score=score.final_score,
-        completed_at=score.completed_at,
-    )
-
-
 @router.post(
     "/leaderboards/{game_key}/settle",
     response_model=SettlementResponse,
@@ -247,16 +241,10 @@ def _entry(score: object, rank: int) -> LeaderboardEntry:
 async def settle_leaderboard(
     game_key: str,
     session: Session,
-    request: Request,
+    authorized: SettlementAuthorized,
+    metrics: Metrics,
     period_start: Annotated[datetime, Query()],
-    admin_token: Annotated[str | None, Header(alias="X-Settlement-Token")] = None,
 ) -> SettlementResponse:
-    configured = request.app.state.settings.settlement_admin_token
-    authorized = (
-        configured is not None
-        and admin_token is not None
-        and secrets.compare_digest(configured.get_secret_value(), admin_token)
-    )
     run, recipients = await services.settle_leaderboard(
         session,
         game_key=game_key,
@@ -265,6 +253,7 @@ async def settle_leaderboard(
     )
     if run.completed_at is None:
         raise services.InvalidTransitionError
+    metrics.increment("settlement_outcomes_total", status=run.status.value)
     return SettlementResponse(
         id=run.id,
         game_key=game_key,
@@ -283,9 +272,9 @@ async def settle_leaderboard(
 async def submit_score(
     body: FinalScoreCreate,
     session: Session,
-    request: Request,
+    redis: RedisClient,
     response: Response,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> FinalScoreResponse:
     score, created = await services.submit_final_score(
         session, session_id=body.session_id, owner_id=owner_id
@@ -293,7 +282,7 @@ async def submit_score(
     if not created:
         response.status_code = status.HTTP_200_OK
     else:
-        await project_final_score(getattr(request.app.state, "redis", None), score, "skill_check")
+        await project_final_score(redis, score, "skill_check")
     return FinalScoreResponse.model_validate(score)
 
 
@@ -301,59 +290,28 @@ async def submit_score(
 async def get_leaderboard(
     game_key: str,
     session: Session,
-    request: Request,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    projection: ProjectionReader,
+    owner_id: OwnerId,
     period_start: Annotated[datetime, Query()],
     cursor: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> LeaderboardResponse:
     start = _period_start(period_start)
-    game, database_scores = await services.canonical_leaderboard(
+    page = await projection.page(
         session,
         owner_id=owner_id,
         game_key=game_key,
         period_start=start,
-        limit=limit + 1,
         offset=cursor,
+        limit=limit,
     )
-    total = await repositories.count_canonical_scores(session, game_id=game.id, period_start=start)
-    projected = await projected_page(
-        getattr(request.app.state, "redis", None),
-        game_key=game_key,
-        period_start=start.strftime("%Y%m%dT%H%M%SZ"),
-        offset=cursor,
-        limit=limit + 1,
-        expected_count=total,
-    )
-    if projected is None:
-        items = [
-            _entry(score, cursor + index + 1) for index, score in enumerate(database_scores[:limit])
-        ]
-        has_more = len(database_scores) > limit
-        source = "postgresql"
-    else:
-        items = []
-        for member, score_value, rank in projected[:limit]:
-            completed_us, session_id, score_id, player_id = parse_leaderboard_member(member)
-            items.append(
-                LeaderboardEntry(
-                    rank=rank,
-                    score_id=UUID(score_id),
-                    player_id=UUID(player_id),
-                    session_id=UUID(session_id),
-                    final_score=score_value,
-                    completed_at=datetime.fromtimestamp(completed_us / 1_000_000, UTC),
-                )
-            )
-        has_more = len(projected) > limit
-        source = "redis"
     return LeaderboardResponse(
         game_key=game_key,
         period_start=start,
         period_end=start + timedelta(days=7),
-        source=source,
-        items=items,
-        next_cursor=str(cursor + limit) if has_more else None,
+        source=page.source,
+        items=page.items,
+        next_cursor=str(cursor + limit) if page.has_more else None,
     )
 
 
@@ -361,50 +319,25 @@ async def get_leaderboard(
 async def get_player_rank(
     player_id: UUID,
     session: Session,
-    request: Request,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    projection: ProjectionReader,
+    owner_id: OwnerId,
     game_key: Annotated[str, Query(min_length=1, max_length=40)],
     period_start: Annotated[datetime, Query()],
 ) -> PlayerRankResponse:
     start = _period_start(period_start)
-    score, rank = await services.canonical_player_rank(
+    result = await projection.player_rank(
         session,
         player_id=player_id,
         owner_id=owner_id,
         game_key=game_key,
         period_start=start,
     )
-    total = await repositories.count_canonical_scores(
-        session, game_id=score.game_id, period_start=start
-    )
-    projected = await projected_player_rank(
-        getattr(request.app.state, "redis", None),
-        game_key=game_key,
-        period_start=start.strftime("%Y%m%dT%H%M%SZ"),
-        player_id=str(player_id),
-        expected_count=total,
-    )
-    if projected is None:
-        entry = _entry(score, rank)
-        source = "postgresql"
-    else:
-        member, score_value, projected_rank_value = projected
-        completed_us, session_id, score_id, projected_player = parse_leaderboard_member(member)
-        entry = LeaderboardEntry(
-            rank=projected_rank_value,
-            score_id=UUID(score_id),
-            player_id=UUID(projected_player),
-            session_id=UUID(session_id),
-            final_score=score_value,
-            completed_at=datetime.fromtimestamp(completed_us / 1_000_000, UTC),
-        )
-        source = "redis"
     return PlayerRankResponse(
         game_key=game_key,
         period_start=start,
         period_end=start + timedelta(days=7),
-        source=source,
-        entry=entry,
+        source=result.source,
+        entry=result.entry,
     )
 
 
@@ -414,7 +347,7 @@ async def get_player_rank(
 async def commit_fairness(
     body: FairnessCommitRequest,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> FairnessCommitResponse:
     proof = await services.commit_fairness(session, session_id=body.session_id, owner_id=owner_id)
     return FairnessCommitResponse(
@@ -433,7 +366,7 @@ async def commit_fairness(
 async def evaluate_fairness(
     body: FairnessEvaluateRequest,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> FairnessEvaluateResponse:
     outcome, reward, proof = await services.evaluate_fairness(
         session, proof_id=body.proof_id, owner_id=owner_id, client_seed=body.client_seed
@@ -483,7 +416,7 @@ def _fairness_proof_response(
 async def get_fairness_proof(
     outcome_id: UUID,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> FairnessProofResponse:
     proof, reward_bands = await services.retrieve_fairness_proof(
         session, outcome_id=outcome_id, owner_id=owner_id
@@ -495,7 +428,7 @@ async def get_fairness_proof(
 async def verify_fairness_proof(
     outcome_id: UUID,
     session: Session,
-    owner_id: Annotated[UUID, Header(alias="X-Player-ID")],
+    owner_id: OwnerId,
 ) -> FairnessVerificationResponse:
     _, _, code, verified = await services.verify_fairness_proof(
         session, outcome_id=outcome_id, owner_id=owner_id

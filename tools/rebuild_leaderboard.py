@@ -11,7 +11,12 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
-from app.cache import create_redis_client, leaderboard_key, leaderboard_member
+from app.cache import (
+    create_redis_client,
+    leaderboard_key,
+    leaderboard_member,
+    leaderboard_metadata_key,
+)
 from app.config import get_settings
 from app.database import Database
 from app.logging import configure_logging
@@ -52,7 +57,7 @@ def _mapping(score: object) -> tuple[str, int]:
 async def rebuild_leaderboard(
     session: AsyncSession, client: Redis, *, game_key: str, period_start: datetime
 ) -> int:
-    """Atomically replace a projection, then catch up scores racing the snapshot."""
+    """Atomically replace a projection with one PostgreSQL revision."""
 
     game = await repositories.get_game(session, game_key)
     if game is None:
@@ -66,16 +71,26 @@ async def rebuild_leaderboard(
     try:
         if scores:
             await client.zadd(temporary, dict(_mapping(score) for score in scores))
-            await client.rename(temporary, target)
-        else:
-            await client.delete(target)
-        # A commit projected before rename is recovered here; one after rename
-        # writes directly to the new target.
+        # Refresh immediately before publication. A later commit advances the
+        # PostgreSQL revision, causing readers to reject this generation.
         current = await repositories.list_canonical_scores(
             session, game_id=game.id, period_start=period_start
         )
+        await client.delete(temporary)
         if current:
-            await client.zadd(target, dict(_mapping(score) for score in current))
+            await client.zadd(temporary, dict(_mapping(score) for score in current))
+        revision = await repositories.leaderboard_projection_revision(
+            session, game_id=game.id, period_start=period_start
+        )
+        async with client.pipeline(transaction=True) as pipeline:
+            pipeline.delete(target)
+            if current:
+                pipeline.rename(temporary, target)
+            pipeline.hset(
+                leaderboard_metadata_key(game_key, period_key),
+                mapping={"revision": revision, "count": len(current)},
+            )
+            await pipeline.execute()
         projected = await client.zrange(target, 0, -1, withscores=True)
         expected = [(member, float(value)) for member, value in map(_mapping, current)]
         if projected != expected:

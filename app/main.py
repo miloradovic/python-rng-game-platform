@@ -13,6 +13,7 @@ from app.cache import create_redis_client, redis_is_available
 from app.config import Settings, get_settings
 from app.database import Database
 from app.logging import configure_logging
+from app.observability import MetricsRegistry, install_observability
 from app.rng import HmacOutcomeProvider
 from app.services import (
     ActiveSessionError,
@@ -44,10 +45,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     resolved_settings = settings or get_settings()
     configure_logging(resolved_settings.log_level)
+    metrics = MetricsRegistry()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        database = Database(resolved_settings)
+        database = Database(resolved_settings, metrics)
         redis_client = create_redis_client(resolved_settings)
         application.state.database = database
         application.state.redis = redis_client
@@ -73,13 +75,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = resolved_settings
+    application.state.metrics = metrics
+    application.state.redis = None
     application.state.outcome_provider = HmacOutcomeProvider(
         resolved_settings.outcome_hmac_secret.get_secret_value()
     )
 
     @application.exception_handler(DomainError)
     async def domain_error_handler(request: Request, error: DomainError) -> JSONResponse:
-        del request
+        if request.url.path.startswith("/api/v1/fairness/"):
+            metrics.increment("fairness_failures_total", code=error.code)
         status_code = {
             NotFoundError: status.HTTP_404_NOT_FOUND,
             ForbiddenError: status.HTTP_403_FORBIDDEN,
@@ -102,6 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }.get(type(error), status.HTTP_400_BAD_REQUEST)
         return JSONResponse(status_code=status_code, content={"error": {"code": error.code}})
 
+    install_observability(application, metrics)
     application.include_router(health_router)
     application.include_router(api_router)
     return application

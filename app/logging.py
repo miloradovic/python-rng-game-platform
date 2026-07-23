@@ -20,6 +20,10 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info is not None:
             payload["exception"] = self.formatException(record.exc_info)
+        for field in ("request_id", "method", "path", "status_code", "duration_ms", "event"):
+            value = getattr(record, field, None)
+            if value is not None:
+                payload[field] = value
         return json.dumps(payload, separators=(",", ":"))
 
 
@@ -29,3 +33,4 @@ def configure_logging(level: str) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     logging.basicConfig(level=level, handlers=[handler], force=True)
+    logging.getLogger("httpx").setLevel(logging.WARNING)

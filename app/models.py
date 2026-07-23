@@ -295,6 +295,23 @@ class FinalScore(Timestamped, Base):
     final_score: Mapped[int] = mapped_column(BigInteger)
 
 
+class LeaderboardProjectionRevision(Base):
+    """PostgreSQL watermark for one disposable leaderboard projection."""
+
+    __tablename__ = "leaderboard_projection_revisions"
+    __table_args__ = (
+        CheckConstraint("revision >= 0", name="ck_leaderboard_projection_revision_nonnegative"),
+    )
+    game_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("games.id", ondelete="RESTRICT"), primary_key=True
+    )
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    revision: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class RewardTierConfig(Timestamped, Base):
     """Immutable published leaderboard reward tiers."""
 

@@ -18,6 +18,16 @@ class AvailableDatabase:
     async def check_connection(self) -> None:
         """Represent an available required database."""
 
+    async def check_schema_revision(self) -> None:
+        """Represent a database migrated to the expected application head."""
+
+
+class OutdatedDatabase(AvailableDatabase):
+    """Minimal dependency representing a reachable but outdated schema."""
+
+    async def check_schema_revision(self) -> None:
+        raise RuntimeError("outdated")
+
 
 @pytest.fixture
 def application(settings: Settings) -> Any:
@@ -70,3 +80,30 @@ async def test_versioned_api_boundary(application: Any) -> None:
 
     assert response.status_code == 200
     assert response.json()["version"] == "0.1.0"
+
+
+async def test_requests_are_correlated_and_metrics_are_exposed(application: Any) -> None:
+    """Safe caller IDs are echoed and low-cardinality request measurements are visible."""
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        response = await client.get("/live", headers={"X-Request-ID": "phase4-check"})
+        metrics = await client.get("/metrics")
+
+    assert response.headers["X-Request-ID"] == "phase4-check"
+    assert "http_requests_total" in metrics.text
+    assert "phase4-check" not in metrics.text
+
+
+async def test_readiness_rejects_an_outdated_schema(application: Any) -> None:
+    """Connectivity alone cannot make an incompatible database report ready."""
+
+    application.dependency_overrides[get_database] = OutdatedDatabase
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "required database is unavailable"}

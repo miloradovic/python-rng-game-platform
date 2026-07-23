@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 from app.cache import create_redis_client
 from app.config import get_settings
-from app.database import Database
+from app.database import EXPECTED_ALEMBIC_REVISION, Database
 
 pytestmark = pytest.mark.integration
 
@@ -21,7 +21,7 @@ async def test_postgresql_connection_and_current_revision() -> None:
     finally:
         await database.dispose()
 
-    assert revision == "0012_fairness_idempotency"
+    assert revision == EXPECTED_ALEMBIC_REVISION
 
 
 async def test_real_redis_connection_when_configured() -> None:
