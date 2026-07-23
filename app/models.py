@@ -6,19 +6,20 @@ from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     LargeBinary,
     String,
     UniqueConstraint,
     func,
+    text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -53,6 +54,11 @@ class RewardStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class SettlementStatus(StrEnum):
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+
+
 class FairnessProofStatus(StrEnum):
     """Durable lifecycle states for a protocol-versioned fairness proof."""
 
@@ -73,6 +79,7 @@ class Timestamped:
 
 class Player(Timestamped, Base):
     __tablename__ = "players"
+    __table_args__ = (CheckConstraint("length(trim(display_name)) >= 2", name="ck_player_name"),)
     display_name: Mapped[str] = mapped_column(String(50))
     status: Mapped[PlayerStatus] = mapped_column(
         Enum(PlayerStatus, name="player_status", values_callable=lambda e: [x.value for x in e]),
@@ -83,6 +90,7 @@ class Player(Timestamped, Base):
 
 class Game(Timestamped, Base):
     __tablename__ = "games"
+    __table_args__ = (UniqueConstraint("id", "key", name="uq_games_id_key"),)
     key: Mapped[str] = mapped_column(String(40), unique=True)
     name: Mapped[str] = mapped_column(String(80))
     description: Mapped[str] = mapped_column(String(300))
@@ -91,46 +99,139 @@ class Game(Timestamped, Base):
 
 class GameConfigVersion(Timestamped, Base):
     __tablename__ = "game_config_versions"
+    __table_args__ = (
+        UniqueConstraint("game_id", "version", name="uq_game_config_version"),
+        UniqueConstraint("game_id", "id", name="uq_game_config_game_binding"),
+        CheckConstraint("version > 0", name="ck_config_version_positive"),
+        CheckConstraint(
+            "jsonb_typeof(payload) = 'object' "
+            "AND payload ? 'game_type' AND payload ? 'cooldown_seconds'",
+            name="ck_config_payload_shape",
+        ),
+        CheckConstraint(
+            "(status = 'published' AND published_at IS NOT NULL) OR (status <> 'published')",
+            name="ck_config_published_at",
+        ),
+        Index(
+            "uq_game_one_published_config",
+            "game_id",
+            unique=True,
+            postgresql_where=text("status = 'published'"),
+        ),
+    )
     game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
     version: Mapped[int]
     status: Mapped[ConfigStatus] = mapped_column(
         Enum(ConfigStatus, name="config_status", values_callable=lambda e: [x.value for x in e])
     )
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class GameSession(Timestamped, Base):
     __tablename__ = "game_sessions"
+    __table_args__ = (
+        UniqueConstraint("player_id", "request_id", name="uq_session_player_request"),
+        UniqueConstraint(
+            "id",
+            "player_id",
+            "game_id",
+            "config_version_id",
+            name="uq_game_sessions_proof_binding",
+        ),
+        ForeignKeyConstraint(
+            ["game_id", "config_version_id"],
+            ["game_config_versions.game_id", "game_config_versions.id"],
+            name="fk_game_sessions_config_binding",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(status = 'active' AND ended_at IS NULL) "
+            "OR (status <> 'active' AND ended_at IS NOT NULL)",
+            name="ck_session_terminal_ended_at",
+        ),
+        Index("ix_sessions_player_created", "player_id", "created_at"),
+        Index(
+            "uq_active_session_player_game",
+            "player_id",
+            "game_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
     player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id", ondelete="RESTRICT"))
-    game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
-    config_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("game_config_versions.id"))
+    game_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    config_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     status: Mapped[SessionStatus] = mapped_column(
         Enum(SessionStatus, name="session_status", values_callable=lambda e: [x.value for x in e])
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    challenge: Mapped[dict[str, Any]] = mapped_column(JSON)
+    challenge: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
 
 
 class Outcome(Timestamped, Base):
     __tablename__ = "outcomes"
-    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("game_sessions.id"), unique=True)
-    config_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("game_config_versions.id"))
+    __table_args__ = (
+        UniqueConstraint("session_id", name="uq_outcomes_session"),
+        UniqueConstraint("id", "session_id", "config_version_id", name="uq_outcomes_proof_binding"),
+        UniqueConstraint("id", "player_id", name="uq_outcomes_player_binding"),
+        ForeignKeyConstraint(
+            ["session_id", "player_id", "game_id", "config_version_id"],
+            [
+                "game_sessions.id",
+                "game_sessions.player_id",
+                "game_sessions.game_id",
+                "game_sessions.config_version_id",
+            ],
+            name="fk_outcomes_session_binding",
+            ondelete="RESTRICT",
+        ),
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    player_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    game_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    config_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     status: Mapped[OutcomeStatus] = mapped_column(
         Enum(OutcomeStatus, name="outcome_status", values_callable=lambda e: [x.value for x in e])
     )
-    result: Mapped[dict[str, Any]] = mapped_column(JSON)
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB)
 
 
 class Reward(Timestamped, Base):
     __tablename__ = "rewards"
-    outcome_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("outcomes.id"), unique=True)
-    settlement_recipient_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("settlement_recipients.id"), unique=True
+    __table_args__ = (
+        UniqueConstraint("outcome_id", name="rewards_outcome_id_key"),
+        UniqueConstraint("settlement_recipient_id", name="uq_rewards_settlement_recipient"),
+        ForeignKeyConstraint(
+            ["outcome_id", "player_id"],
+            ["outcomes.id", "outcomes.player_id"],
+            name="fk_rewards_outcome_owner",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["settlement_recipient_id", "player_id"],
+            ["settlement_recipients.id", "settlement_recipients.player_id"],
+            name="fk_rewards_settlement_owner",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("value >= 0", name="ck_reward_value"),
+        CheckConstraint(
+            "(outcome_id IS NOT NULL) <> (settlement_recipient_id IS NOT NULL)",
+            name="ck_rewards_exactly_one_source",
+        ),
+        Index("ix_rewards_player_created", "player_id", "created_at"),
+        Index(
+            "ix_rewards_player_created_id",
+            "player_id",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
     )
-    player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id"))
+    outcome_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    settlement_recipient_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    player_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     status: Mapped[RewardStatus] = mapped_column(
         Enum(RewardStatus, name="reward_status", values_callable=lambda e: [x.value for x in e])
     )
@@ -145,6 +246,13 @@ class FinalScore(Timestamped, Base):
     __tablename__ = "final_scores"
     __table_args__ = (
         UniqueConstraint("session_id", name="uq_final_scores_session"),
+        UniqueConstraint(
+            "id",
+            "player_id",
+            "game_id",
+            "period_start",
+            name="uq_final_scores_settlement_binding",
+        ),
         ForeignKeyConstraint(
             ["session_id", "player_id", "game_id", "config_version_id"],
             [
@@ -164,16 +272,21 @@ class FinalScore(Timestamped, Base):
         ),
         CheckConstraint("final_score >= 0", name="ck_final_scores_score_nonnegative"),
         CheckConstraint("final_score <= 1000000", name="ck_final_scores_score_maximum"),
+        Index(
+            "ix_final_scores_ranking",
+            "game_id",
+            "period_start",
+            text("final_score DESC"),
+            "completed_at",
+            "session_id",
+        ),
+        Index("ix_final_scores_player_period", "player_id", "game_id", "period_start"),
     )
-    player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id", ondelete="RESTRICT"))
-    game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
-    session_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("game_sessions.id", ondelete="RESTRICT")
-    )
-    outcome_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("outcomes.id", ondelete="RESTRICT"))
-    config_version_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("game_config_versions.id", ondelete="RESTRICT")
-    )
+    player_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    game_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    outcome_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    config_version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     final_score: Mapped[int] = mapped_column(BigInteger)
@@ -183,10 +296,13 @@ class RewardTierConfig(Timestamped, Base):
     """Immutable published leaderboard reward tiers."""
 
     __tablename__ = "reward_tier_configs"
-    __table_args__ = (UniqueConstraint("game_id", "version", name="uq_reward_tier_config_version"),)
+    __table_args__ = (
+        UniqueConstraint("game_id", "version", name="uq_reward_tier_config_version"),
+        UniqueConstraint("id", "game_id", name="uq_reward_tier_config_game_binding"),
+    )
     game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
     version: Mapped[int]
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -196,15 +312,33 @@ class SettlementRun(Timestamped, Base):
     __tablename__ = "settlement_runs"
     __table_args__ = (
         UniqueConstraint("game_id", "period_start", name="uq_settlement_game_period"),
+        UniqueConstraint("id", "game_id", "period_start", name="uq_settlement_run_period_binding"),
+        ForeignKeyConstraint(
+            ["tier_config_id", "game_id"],
+            ["reward_tier_configs.id", "reward_tier_configs.game_id"],
+            name="fk_settlement_runs_tier_game",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "period_end = period_start + interval '7 days'", name="ck_settlement_period"
+        ),
+        CheckConstraint("status IN ('processing', 'completed')", name="ck_settlement_status"),
     )
-    game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
+    game_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    tier_config_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("reward_tier_configs.id", ondelete="RESTRICT")
+    tier_config_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    tier_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[SettlementStatus] = mapped_column(
+        Enum(
+            SettlementStatus,
+            name="settlement_status",
+            values_callable=lambda e: [x.value for x in e],
+            native_enum=False,
+            create_constraint=False,
+            length=20,
+        )
     )
-    tier_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
-    status: Mapped[str] = mapped_column(String(20))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -215,10 +349,32 @@ class SettlementRecipient(Timestamped, Base):
     __table_args__ = (
         UniqueConstraint("run_id", "player_id", name="uq_settlement_recipient_player"),
         UniqueConstraint("run_id", "rank", name="uq_settlement_recipient_rank"),
+        UniqueConstraint("id", "player_id", name="uq_settlement_recipient_owner_binding"),
+        ForeignKeyConstraint(
+            ["run_id", "game_id", "period_start"],
+            ["settlement_runs.id", "settlement_runs.game_id", "settlement_runs.period_start"],
+            name="fk_settlement_recipients_run_binding",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["score_id", "player_id", "game_id", "period_start"],
+            [
+                "final_scores.id",
+                "final_scores.player_id",
+                "final_scores.game_id",
+                "final_scores.period_start",
+            ],
+            name="fk_settlement_recipients_score_binding",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("rank > 0", name="ck_settlement_recipient_rank"),
+        CheckConstraint("reward_value >= 0", name="ck_settlement_recipient_reward"),
     )
-    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("settlement_runs.id", ondelete="RESTRICT"))
-    player_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("players.id", ondelete="RESTRICT"))
-    score_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("final_scores.id", ondelete="RESTRICT"))
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    player_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    score_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    game_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     rank: Mapped[int]
     tier_key: Mapped[str] = mapped_column(String(40))
     reward_value: Mapped[int]
@@ -226,18 +382,22 @@ class SettlementRecipient(Timestamped, Base):
 
 class AuditRecord(Timestamped, Base):
     __tablename__ = "audit_records"
+    __table_args__ = (Index("ix_audit_entity", "entity_type", "entity_id", "created_at"),)
     event_type: Mapped[str] = mapped_column(String(80))
     entity_type: Mapped[str] = mapped_column(String(40))
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
-    evidence: Mapped[dict[str, Any]] = mapped_column(JSON)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB)
 
 
 class AnalyticsEvent(Timestamped, Base):
     __tablename__ = "analytics_events"
+    __table_args__ = (
+        Index("ix_analytics_player_type_created", "player_id", "event_type", "created_at"),
+    )
     event_key: Mapped[str] = mapped_column(String(120), unique=True)
     event_type: Mapped[str] = mapped_column(String(80))
     player_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("players.id"))
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
 
 
 class FairnessProof(Timestamped, Base):
@@ -320,6 +480,7 @@ class FairnessProof(Timestamped, Base):
             "AND evaluated_at IS NULL AND server_seed_revealed IS NULL AND revealed_at IS NULL)",
             name="ck_fairness_proof_lifecycle_evidence",
         ),
+        Index("ix_fairness_proofs_player_created", "player_id", "created_at"),
     )
 
     session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))

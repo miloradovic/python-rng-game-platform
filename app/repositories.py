@@ -324,6 +324,8 @@ async def add_outcome(
 ) -> Outcome:
     outcome = Outcome(
         session_id=game_session.id,
+        player_id=game_session.player_id,
+        game_id=game_session.game_id,
         config_version_id=game_session.config_version_id,
         status=OutcomeStatus.ACCEPTED,
         result=result,

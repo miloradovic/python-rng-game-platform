@@ -25,6 +25,7 @@ from app.models import (
     SessionStatus,
     SettlementRecipient,
     SettlementRun,
+    SettlementStatus,
 )
 from app.rng import (
     ALGORITHM_HMAC_SHA256,
@@ -120,6 +121,41 @@ def leaderboard_period(completed_at: datetime) -> tuple[datetime, datetime]:
         hour=0, minute=0, second=0, microsecond=0
     )
     return start, start + timedelta(days=7)
+
+
+async def _owned_session(
+    session: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    for_update: bool,
+) -> GameSession:
+    """Load a session and preserve the public not-found-before-forbidden contract."""
+
+    loader = repositories.lock_session if for_update else repositories.get_session
+    game_session = await loader(session, session_id)
+    if game_session is None:
+        raise NotFoundError
+    if game_session.player_id != owner_id:
+        raise ForbiddenError
+    return game_session
+
+
+async def _owned_outcome(
+    session: AsyncSession, *, outcome_id: uuid.UUID, owner_id: uuid.UUID
+) -> tuple[Outcome, GameSession]:
+    """Load an outcome through its authoritative owner-bound session."""
+
+    outcome = await repositories.get_outcome(session, outcome_id)
+    if outcome is None:
+        raise NotFoundError
+    game_session = await _owned_session(
+        session,
+        session_id=outcome.session_id,
+        owner_id=owner_id,
+        for_update=False,
+    )
+    return outcome, game_session
 
 
 async def _eligible_leaderboard_game(session: AsyncSession, game_key: str) -> Game:
@@ -275,8 +311,10 @@ async def settle_leaderboard(
     existing = await repositories.settlement_run(
         session, game_id=game.id, period_start=period_start
     )
-    if existing is not None and existing.status == "completed":
-        return existing, await repositories.settlement_recipients(session, existing.id)
+    if existing is not None and existing.status == SettlementStatus.COMPLETED:
+        recipients = await repositories.settlement_recipients(session, existing.id)
+        await session.commit()
+        return existing, recipients
     period_end = period_start + timedelta(days=7)
     now = clock().astimezone(UTC)
     if now < period_end:
@@ -297,7 +335,7 @@ async def settle_leaderboard(
             period_end=period_end,
             tier_config_id=config.id,
             tier_snapshot=config.payload,
-            status="processing",
+            status=SettlementStatus.PROCESSING,
             completed_at=None,
         )
         session.add(run)
@@ -337,6 +375,8 @@ async def settle_leaderboard(
                 run_id=run.id,
                 player_id=score.player_id,
                 score_id=score.id,
+                game_id=score.game_id,
+                period_start=score.period_start,
                 rank=rank,
                 tier_key=key,
                 reward_value=value,
@@ -351,7 +391,7 @@ async def settle_leaderboard(
                 session, reward, event_type="settlement_reward_issued", game_key=game.key
             )
         seen_players.add(score.player_id)
-    run.status = "completed"
+    run.status = SettlementStatus.COMPLETED
     run.completed_at = now
     recipients = await repositories.settlement_recipients(session, run.id)
     session.add(
@@ -731,14 +771,7 @@ async def analytics_game_summary(
 async def retrieve_outcome_audit(
     session: AsyncSession, outcome_id: uuid.UUID, owner_id: uuid.UUID
 ) -> tuple[Outcome, dict[str, object]]:
-    outcome = await repositories.get_outcome(session, outcome_id)
-    if outcome is None:
-        raise NotFoundError
-    game_session = await repositories.get_session(session, outcome.session_id)
-    if game_session is None:
-        raise NotFoundError
-    if game_session.player_id != owner_id:
-        raise ForbiddenError
+    outcome, _ = await _owned_outcome(session, outcome_id=outcome_id, owner_id=owner_id)
     audit = await repositories.get_outcome_audit(session, outcome_id)
     if audit is None:
         raise NotFoundError
@@ -751,30 +784,19 @@ async def retrieve_session(
     owner_id: uuid.UUID,
     clock: Callable[[], datetime] = utc_now,
 ) -> GameSession:
-    game_session = await repositories.lock_session(session, session_id)
-    if game_session is None:
-        raise NotFoundError
-    if game_session.player_id != owner_id:
-        raise ForbiddenError
-    now = clock()
-    if expire_if_due(game_session, now):
-        proof = await repositories.lock_fairness_proof_by_session(session, game_session.id)
-        if proof is not None:
-            await _end_committed_fairness_proof(
-                session, proof, status=FairnessProofStatus.EXPIRED, now=now
-            )
-        await session.commit()
+    game_session = await _owned_session(
+        session, session_id=session_id, owner_id=owner_id, for_update=False
+    )
+    expire_if_due(game_session, clock())
     return game_session
 
 
 async def cancel_session(
     session: AsyncSession, session_id: uuid.UUID, owner_id: uuid.UUID
 ) -> GameSession:
-    game_session = await repositories.lock_session(session, session_id)
-    if game_session is None:
-        raise NotFoundError
-    if game_session.player_id != owner_id:
-        raise ForbiddenError
+    game_session = await _owned_session(
+        session, session_id=session_id, owner_id=owner_id, for_update=True
+    )
     now = utc_now()
     cancel_active(game_session, now)
     proof = await repositories.lock_fairness_proof_by_session(session, game_session.id)
@@ -1060,14 +1082,7 @@ async def retrieve_fairness_proof(
 ) -> tuple[FairnessProof, tuple[FairnessRewardBand, ...]]:
     """Return only finalized proof evidence owned by the requesting player."""
 
-    outcome = await repositories.get_outcome(session, outcome_id)
-    if outcome is None:
-        raise NotFoundError
-    game_session = await repositories.get_session(session, outcome.session_id)
-    if game_session is None:
-        raise NotFoundError
-    if game_session.player_id != owner_id:
-        raise ForbiddenError
+    outcome, _ = await _owned_outcome(session, outcome_id=outcome_id, owner_id=owner_id)
     proof = await repositories.get_fairness_proof_by_outcome(session, outcome.id)
     if proof is None:
         raise NotFoundError

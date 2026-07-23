@@ -46,6 +46,13 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
+        """DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM game_sessions) THEN
+            RAISE EXCEPTION 'cannot downgrade 0004 with persisted gameplay state';
+          END IF;
+        END $$"""
+    )
+    op.execute(
         """CREATE OR REPLACE FUNCTION protect_published_config() RETURNS trigger
         LANGUAGE plpgsql AS $$
         BEGIN

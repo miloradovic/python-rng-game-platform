@@ -28,6 +28,7 @@ from app.models import (
     SessionStatus,
     SettlementRecipient,
     SettlementRun,
+    SettlementStatus,
 )
 from app.rng import HmacOutcomeProvider
 from tools.rebuild_leaderboard import _mapping, rebuild_leaderboard
@@ -265,6 +266,8 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
             outcome = Outcome(
                 id=uuid4(),
                 session_id=game_session.id,
+                player_id=player_id,
+                game_id=game.id,
                 config_version_id=config.id,
                 status=OutcomeStatus.ACCEPTED,
                 result={"score": 900},
@@ -312,7 +315,7 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
                 period_end=period_start + timedelta(days=7),
                 tier_config_id=tier_config.id,
                 tier_snapshot=tier_config.payload,
-                status="processing",
+                status=SettlementStatus.PROCESSING,
                 completed_at=None,
             )
             session.add(run)
@@ -322,6 +325,8 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
                     run_id=run.id,
                     player_id=player_id,
                     score_id=score.id,
+                    game_id=game.id,
+                    period_start=period_start,
                     rank=1,
                     tier_key="champion",
                     reward_value=500,

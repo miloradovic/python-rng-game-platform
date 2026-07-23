@@ -36,6 +36,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # This restores trigger semantics without removing stored fairness evidence.
     op.execute(
         """CREATE OR REPLACE FUNCTION protect_finalized_fairness_proof()
         RETURNS trigger LANGUAGE plpgsql AS $$

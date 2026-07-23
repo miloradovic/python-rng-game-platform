@@ -109,4 +109,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Removing this query-only index does not alter analytics evidence.
     op.drop_index("ix_analytics_player_type_created", table_name="analytics_events")

@@ -40,6 +40,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        """DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM game_sessions) THEN
+            RAISE EXCEPTION 'cannot downgrade 0003 with persisted session evidence';
+          END IF;
+        END $$"""
+    )
     op.drop_constraint("ck_session_terminal_ended_at", "game_sessions", type_="check")
     op.drop_index("uq_active_session_player_game", table_name="game_sessions")
     op.drop_constraint("uq_session_player_request", "game_sessions", type_="unique")

@@ -26,5 +26,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        """DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM rewards WHERE claimed_at IS NOT NULL) THEN
+            RAISE EXCEPTION 'cannot downgrade 0005 with persisted reward claim evidence';
+          END IF;
+        END $$"""
+    )
     op.drop_index("ix_rewards_player_created_id", table_name="rewards")
     op.drop_column("rewards", "claimed_at")

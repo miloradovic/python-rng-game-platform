@@ -46,6 +46,20 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        """DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM players)
+             OR EXISTS (SELECT 1 FROM games)
+             OR EXISTS (SELECT 1 FROM game_config_versions)
+             OR EXISTS (SELECT 1 FROM game_sessions)
+             OR EXISTS (SELECT 1 FROM outcomes)
+             OR EXISTS (SELECT 1 FROM rewards)
+             OR EXISTS (SELECT 1 FROM audit_records)
+             OR EXISTS (SELECT 1 FROM analytics_events) THEN
+            RAISE EXCEPTION 'cannot downgrade 0002 with persisted domain data';
+          END IF;
+        END $$"""
+    )
     op.drop_table("analytics_events")
     op.drop_table("audit_records")
     op.drop_table("rewards")

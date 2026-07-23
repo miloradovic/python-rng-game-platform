@@ -101,6 +101,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        """DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM reward_tier_configs)
+             OR EXISTS (SELECT 1 FROM settlement_runs)
+             OR EXISTS (SELECT 1 FROM settlement_recipients)
+             OR EXISTS (SELECT 1 FROM rewards WHERE settlement_recipient_id IS NOT NULL) THEN
+            RAISE EXCEPTION 'cannot downgrade 0010 with persisted settlement evidence';
+          END IF;
+        END $$"""
+    )
     op.execute("DROP TRIGGER reward_tier_config_immutable ON reward_tier_configs")
     op.execute("DROP FUNCTION protect_reward_tier_config()")
     op.drop_constraint("ck_rewards_exactly_one_source", "rewards", type_="check")

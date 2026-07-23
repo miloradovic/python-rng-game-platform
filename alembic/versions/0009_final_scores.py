@@ -63,6 +63,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        """DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM final_scores) THEN
+            RAISE EXCEPTION 'cannot downgrade 0009 with persisted score evidence';
+          END IF;
+        END $$"""
+    )
     op.drop_index("ix_final_scores_player_period", table_name="final_scores")
     op.drop_index("ix_final_scores_ranking", table_name="final_scores")
     op.drop_table("final_scores")
