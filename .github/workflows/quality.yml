@@ -37,6 +37,9 @@ jobs:
       - name: Type check
         run: docker compose run --rm app mypy app tests tools
 
+      - name: Detect metadata and migration drift
+        run: docker compose run --rm app alembic check
+
       - name: Test
         run: docker compose run --rm app pytest
 

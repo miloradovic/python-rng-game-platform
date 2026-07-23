@@ -24,6 +24,7 @@ from app.models import (
     OutcomeStatus,
     Player,
     Reward,
+    RewardTierConfig,
     SessionStatus,
     SettlementRecipient,
     SettlementRun,
@@ -236,7 +237,8 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
 async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() -> None:
     database = Database(get_settings())
     player_id = uuid4()
-    period_start = datetime(2026, 7, 6, tzinfo=UTC) + timedelta(days=7 * (player_id.int % 200))
+    period_start = datetime(2026, 7, 6, tzinfo=UTC)
+    settlement_time = period_start + timedelta(days=7)
     try:
         async with database.session_factory.begin() as session:
             await seed_catalogue(session)
@@ -281,6 +283,25 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
             )
             session.add(score)
             await session.flush()
+            session.add(
+                RewardTierConfig(
+                    id=uuid4(),
+                    game_id=game.id,
+                    version=1,
+                    payload={
+                        "tiers": [
+                            {
+                                "key": "champion",
+                                "min_rank": 1,
+                                "max_rank": 1,
+                                "reward_value": 500,
+                            }
+                        ]
+                    },
+                    published_at=period_start,
+                )
+            )
+            await session.flush()
             tier_config = await repositories.settlement_tier_config(
                 session, game_id=game.id, period_end=period_start + timedelta(days=7)
             )
@@ -314,6 +335,7 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
                     game_key="skill_check",
                     period_start=period_start,
                     authorized=True,
+                    clock=lambda: settlement_time,
                 )
 
         results = await asyncio.gather(settle(), settle())

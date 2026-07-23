@@ -38,6 +38,7 @@ docker compose run --rm app ruff format --check .
 docker compose run --rm app ruff check .
 docker compose run --rm app mypy app tests tools
 docker compose run --rm app pytest
+docker compose run --rm app alembic check
 docker compose run --rm app python -m tools.simulate daily_spin --runs 100000
 ```
 
