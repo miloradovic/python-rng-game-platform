@@ -23,7 +23,7 @@ def reward_value(config: GameConfigVersion, outcome: Outcome, game_key: str | No
     """Derive an entitlement only from an accepted outcome and its immutable config."""
     payload = game_config_adapter.validate_python(config.payload)
     try:
-        return rules_for(game_key or payload.game_type).reward_value(config, outcome)
+        return rules_for(game_key or payload.game_type).definition.reward_value(config, outcome)
     except InvalidRulesInputError as error:
         raise InvalidPlayError from error
 

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
-from app.game_rules import GameKey, InvalidRulesInputError, rules_for
+from app.game_rules import InvalidRulesInputError, LeaderboardScoreExtraction, rules_for
 from app.models import (
     AuditRecord,
     FinalScore,
@@ -18,7 +18,6 @@ from app.models import (
     SettlementRun,
     SettlementStatus,
 )
-from app.schemas import game_config_adapter
 from app.services._common import utc_now
 from app.services.errors import (
     ForbiddenError,
@@ -52,12 +51,22 @@ async def _eligible_leaderboard_game(session: AsyncSession, game_key: str) -> Ga
     if not game.is_active:
         raise InactiveGameError
     try:
-        rules = rules_for(game.key)
+        registered_game = rules_for(game.key)
     except InvalidRulesInputError as error:
         raise LeaderboardGameIneligibleError from error
-    if not rules.capabilities.leaderboard:
+    if registered_game.mode != "direct" or registered_game.leaderboard is None:
         raise LeaderboardGameIneligibleError
     return game
+
+
+def _leaderboard_capability(game_key: str) -> LeaderboardScoreExtraction:
+    try:
+        registered_game = rules_for(game_key)
+    except InvalidRulesInputError as error:
+        raise LeaderboardGameIneligibleError from error
+    if registered_game.mode != "direct" or registered_game.leaderboard is None:
+        raise LeaderboardGameIneligibleError
+    return registered_game.leaderboard
 
 
 async def submit_final_score(
@@ -86,12 +95,7 @@ async def submit_final_score(
     game = await repositories.get_game_by_id(session, game_session.game_id)
     if game is None:
         raise NotFoundError
-    try:
-        rules = rules_for(game.key)
-    except InvalidRulesInputError as error:
-        raise LeaderboardGameIneligibleError from error
-    if not rules.capabilities.leaderboard:
-        raise LeaderboardGameIneligibleError
+    leaderboard = _leaderboard_capability(game.key)
     if game_session.status != SessionStatus.COMPLETED or game_session.ended_at is None:
         raise InvalidTransitionError
     outcome = await repositories.get_outcome_by_session(session, game_session.id)
@@ -100,12 +104,10 @@ async def submit_final_score(
     config = await repositories.get_config_by_id(session, game_session.config_version_id)
     if config is None:
         raise NotFoundError
-    payload = game_config_adapter.validate_python(config.payload)
-    if payload.game_type != GameKey.SKILL_CHECK.value:
-        raise LeaderboardGameIneligibleError
-    value = outcome.result.get("score")
-    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= payload.max_score:
-        raise InvalidPlayError
+    try:
+        value = leaderboard.leaderboard_score(config, outcome)
+    except InvalidRulesInputError as error:
+        raise InvalidPlayError from error
     period_start, period_end = leaderboard_period(game_session.ended_at)
     if clock().astimezone(UTC) >= period_end:
         raise LeaderboardPeriodClosedError

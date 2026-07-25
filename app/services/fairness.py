@@ -20,7 +20,7 @@ from app.fairness_events import (
 from app.fairness_events import (
     revealed_event_payload as _revealed_event_payload,
 )
-from app.game_rules import GameKey
+from app.game_rules import InvalidRulesInputError, rules_for
 from app.models import (
     FairnessProof,
     FairnessProofEvent,
@@ -43,7 +43,6 @@ from app.rng import (
     verify_daily_spin_proof,
 )
 from app.rng import RewardBand as FairnessRewardBand
-from app.schemas import game_config_adapter
 from app.services._common import _owned_outcome, _request_fingerprint, utc_now
 from app.services.errors import (
     ForbiddenError,
@@ -61,13 +60,16 @@ from app.services.session_termination import (
 )
 
 
-def _daily_spin_fairness_bands(config: GameConfigVersion) -> tuple[FairnessRewardBand, ...]:
-    payload = game_config_adapter.validate_python(config.payload)
-    if payload.game_type != GameKey.DAILY_SPIN.value:
-        raise InvalidPlayError
-    return tuple(
-        FairnessRewardBand(reward.key, reward.weight, reward.value) for reward in payload.rewards
-    )
+def _fairness_reward_bands(
+    game_key: str, config: GameConfigVersion
+) -> tuple[FairnessRewardBand, ...]:
+    try:
+        registered_game = rules_for(game_key)
+        if registered_game.mode != "fairness":
+            raise InvalidRulesInputError("game does not support fairness")
+        return registered_game.fairness.fairness_reward_bands(config)
+    except InvalidRulesInputError as error:
+        raise InvalidPlayError from error
 
 
 async def commit_fairness(
@@ -92,18 +94,13 @@ async def commit_fairness(
         raise InvalidTransitionError
     game = await repositories.get_game_by_id(session, game_session.game_id)
     config = await repositories.get_config_by_id(session, game_session.config_version_id)
-    if (
-        game is None
-        or config is None
-        or game.key != GameKey.DAILY_SPIN.value
-        or config.game_id != game.id
-    ):
+    if game is None or config is None or config.game_id != game.id:
         raise InvalidPlayError
     existing = await repositories.lock_fairness_proof_by_session(session, game_session.id)
     if existing is not None:
         await session.commit()
         return existing
-    bands = _daily_spin_fairness_bands(config)
+    bands = _fairness_reward_bands(game.key, config)
     seed = create_server_seed()
     proof = FairnessProof(
         session_id=game_session.id,
@@ -202,7 +199,7 @@ async def evaluate_fairness(
     game = await repositories.get_game_by_id(session, proof.game_id)
     config = await repositories.get_config_by_id(session, proof.config_version_id)
     custody = await repositories.get_fairness_seed_custody(session, proof.id)
-    if game is None or config is None or custody is None or game.key != GameKey.DAILY_SPIN.value:
+    if game is None or config is None or custody is None:
         raise NotFoundError
     try:
         derivation = derive_daily_spin(
@@ -211,7 +208,7 @@ async def evaluate_fairness(
             nonce=proof.nonce,
             config_version_id=proof.config_version_id,
             session_id=proof.session_id,
-            reward_bands=_daily_spin_fairness_bands(config),
+            reward_bands=_fairness_reward_bands(game.key, config),
             game_key=proof.game_key,
             protocol_version=proof.protocol_version,
             algorithm=proof.algorithm,
@@ -423,7 +420,7 @@ async def retrieve_fairness_proof(
     config = await repositories.get_config_by_id(session, proof.config_version_id)
     if config is None:
         raise NotFoundError
-    return revealed, _daily_spin_fairness_bands(config)
+    return revealed, _fairness_reward_bands(proof.game_key, config)
 
 
 async def verify_fairness_proof(

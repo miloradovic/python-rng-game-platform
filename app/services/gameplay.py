@@ -49,13 +49,13 @@ async def play_session(
     if game is None or config is None or config.game_id != game.id:
         raise NotFoundError
     try:
-        rules = rules_for(game.key)
+        registered_game = rules_for(game.key)
     except InvalidRulesInputError as error:
         raise InvalidPlayError from error
-    if rules.capabilities.fairness:
+    if registered_game.mode == "fairness":
         raise DailySpinFairnessRequiredError
     try:
-        result = rules.evaluate(
+        result = registered_game.direct_play.evaluate(
             game_session=game_session,
             config=config,
             intent=PlayIntent(choice=choice, actions=actions),

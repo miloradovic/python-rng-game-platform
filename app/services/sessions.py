@@ -81,7 +81,7 @@ async def create_session(
         raise CooldownError
     duration = getattr(payload, "duration_seconds", 300)
     try:
-        challenge = rules_for(game.key).create_challenge()
+        challenge = rules_for(game.key).definition.create_challenge()
     except InvalidRulesInputError as error:
         raise InvalidPlayError from error
     game_session = await repositories.add_session(

@@ -171,7 +171,7 @@ async def test_play_session_dispatches_each_registered_current_game_branch(
     challenge: dict[str, object],
     result_key: str,
 ) -> None:
-    """Capture the three current dispatch paths before they move behind a registry."""
+    """Both direct-play games dispatch through their registered capability."""
 
     now = datetime(2026, 1, 1, tzinfo=UTC)
     player_id, game_id, config_id, session_id = (uuid4() for _ in range(4))

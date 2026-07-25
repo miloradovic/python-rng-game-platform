@@ -82,6 +82,28 @@ def test_unknown_daily_reward_is_rejected() -> None:
         reward_value(config(payload), outcome)
 
 
+def test_unknown_game_fails_closed_with_stable_service_error() -> None:
+    game_config = config(
+        {
+            "game_type": "prediction_card",
+            "cooldown_seconds": 0,
+            "choices": ["red", "black"],
+            "correct_reward": 25,
+        }
+    )
+    outcome = Outcome(
+        id=uuid4(),
+        session_id=uuid4(),
+        config_version_id=game_config.id,
+        result={"correct": True},
+    )
+
+    with pytest.raises(InvalidPlayError) as captured:
+        reward_value(game_config, outcome, game_key="unknown")
+
+    assert captured.value.code == "invalid_play"
+
+
 def test_claim_transition_is_idempotent_and_expired_is_unavailable() -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     reward = Reward(

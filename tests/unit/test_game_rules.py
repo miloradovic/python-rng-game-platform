@@ -7,11 +7,14 @@ import pytest
 
 from app.game_rules import (
     DailySpinRules,
+    DirectGameEntry,
+    FairnessGameEntry,
     GameKey,
     InvalidRulesInputError,
     PlayIntent,
     PredictionCardRules,
     SkillCheckRules,
+    registered_game_keys,
     rules_for,
 )
 from app.models import GameConfigVersion, GameSession, Outcome
@@ -37,12 +40,36 @@ def _session(challenge: dict[str, object] | None = None) -> GameSession:
     )
 
 
-def test_registry_exposes_explicit_typed_capabilities() -> None:
-    assert isinstance(rules_for(GameKey.DAILY_SPIN), DailySpinRules)
-    assert isinstance(rules_for(GameKey.PREDICTION_CARD), PredictionCardRules)
-    assert isinstance(rules_for(GameKey.SKILL_CHECK), SkillCheckRules)
-    assert rules_for(GameKey.DAILY_SPIN).capabilities.fairness
-    assert rules_for(GameKey.SKILL_CHECK).capabilities.leaderboard
+def test_registry_exposes_only_supported_typed_capabilities() -> None:
+    daily_spin = rules_for(GameKey.DAILY_SPIN)
+    prediction_card = rules_for(GameKey.PREDICTION_CARD)
+    skill_check = rules_for(GameKey.SKILL_CHECK)
+
+    assert isinstance(daily_spin, FairnessGameEntry)
+    assert daily_spin.mode == "fairness"
+    assert isinstance(daily_spin.definition, DailySpinRules)
+    assert isinstance(daily_spin.fairness, DailySpinRules)
+    assert not hasattr(daily_spin.definition, "evaluate")
+    assert not hasattr(daily_spin, "direct_play")
+    assert not hasattr(daily_spin, "leaderboard")
+
+    assert isinstance(prediction_card, DirectGameEntry)
+    assert prediction_card.mode == "direct"
+    assert isinstance(prediction_card.definition, PredictionCardRules)
+    assert isinstance(prediction_card.direct_play, PredictionCardRules)
+    assert prediction_card.leaderboard is None
+
+    assert isinstance(skill_check, DirectGameEntry)
+    assert skill_check.mode == "direct"
+    assert isinstance(skill_check.definition, SkillCheckRules)
+    assert isinstance(skill_check.direct_play, SkillCheckRules)
+    assert isinstance(skill_check.leaderboard, SkillCheckRules)
+
+
+def test_registry_is_complete_for_every_defined_game_key() -> None:
+    assert registered_game_keys() == frozenset(GameKey)
+    for game_key in GameKey:
+        assert rules_for(game_key).definition.key is game_key
 
 
 def test_registry_fails_closed_for_unknown_game() -> None:
@@ -51,7 +78,8 @@ def test_registry_fails_closed_for_unknown_game() -> None:
 
 
 def test_prediction_rules_are_deterministic() -> None:
-    rules = rules_for(GameKey.PREDICTION_CARD)
+    entry = rules_for(GameKey.PREDICTION_CARD)
+    assert entry.mode == "direct"
     config = _config(
         {
             "game_type": "prediction_card",
@@ -65,20 +93,21 @@ def test_prediction_rules_are_deterministic() -> None:
     provider = HmacOutcomeProvider("x" * 32)
     now = datetime(2026, 1, 1, tzinfo=UTC)
 
-    first = rules.evaluate(
+    first = entry.direct_play.evaluate(
         game_session=game_session, config=config, intent=intent, provider=provider, now=now
     )
-    second = rules.evaluate(
+    second = entry.direct_play.evaluate(
         game_session=game_session, config=config, intent=intent, provider=provider, now=now
     )
 
     assert first == second
     outcome = Outcome(session_id=game_session.id, config_version_id=config.id, result=first)
-    assert rules.reward_value(config, outcome) in (0, 25)
+    assert entry.definition.reward_value(config, outcome) in (0, 25)
 
 
 def test_skill_rules_derive_score_without_infrastructure() -> None:
-    rules = rules_for(GameKey.SKILL_CHECK)
+    entry = rules_for(GameKey.SKILL_CHECK)
+    assert entry.mode == "direct"
     config = _config(
         {
             "game_type": "skill_check",
@@ -88,7 +117,7 @@ def test_skill_rules_derive_score_without_infrastructure() -> None:
         }
     )
     game_session = _session({"sequence": [1, 2, 3]})
-    result = rules.evaluate(
+    result = entry.direct_play.evaluate(
         game_session=game_session,
         config=config,
         intent=PlayIntent(choice=None, actions=[1, 2, 9]),
@@ -98,25 +127,28 @@ def test_skill_rules_derive_score_without_infrastructure() -> None:
 
     assert result["score"] == 666
     outcome = Outcome(session_id=game_session.id, config_version_id=config.id, result=result)
-    assert rules.reward_value(config, outcome) == 666
+    assert entry.definition.reward_value(config, outcome) == 666
+    assert entry.leaderboard is not None
+    assert entry.leaderboard.leaderboard_score(config, outcome) == 666
 
 
-def test_daily_spin_generic_evaluation_is_closed() -> None:
-    rules = rules_for(GameKey.DAILY_SPIN)
-    with pytest.raises(InvalidRulesInputError):
-        rules.evaluate(
-            game_session=_session(),
-            config=_config(
-                {
-                    "game_type": "daily_spin",
-                    "cooldown_seconds": 60,
-                    "rewards": [
-                        {"key": "a", "weight": 1, "value": 1},
-                        {"key": "b", "weight": 1, "value": 2},
-                    ],
-                }
-            ),
-            intent=PlayIntent(choice=None, actions=None),
-            provider=HmacOutcomeProvider("x" * 32),
-            now=datetime(2026, 1, 1, tzinfo=UTC),
-        )
+def test_daily_spin_exposes_real_fairness_configuration_without_direct_play() -> None:
+    entry = rules_for(GameKey.DAILY_SPIN)
+    assert entry.mode == "fairness"
+    config = _config(
+        {
+            "game_type": "daily_spin",
+            "cooldown_seconds": 60,
+            "rewards": [
+                {"key": "a", "weight": 1, "value": 1},
+                {"key": "b", "weight": 2, "value": 2},
+            ],
+        }
+    )
+
+    bands = entry.fairness.fairness_reward_bands(config)
+
+    assert [(band.key, band.weight, band.value) for band in bands] == [
+        ("a", 1, 1),
+        ("b", 2, 2),
+    ]

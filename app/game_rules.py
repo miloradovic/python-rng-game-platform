@@ -3,10 +3,10 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.models import GameConfigVersion, GameSession, Outcome
-from app.rng import OutcomeProvider, secure_challenge
+from app.rng import OutcomeProvider, RewardBand, secure_challenge
 from app.schemas import (
     DailySpinConfig,
     GameConfigPayload,
@@ -25,12 +25,6 @@ class GameKey(StrEnum):
 
 
 @dataclass(frozen=True)
-class GameCapabilities:
-    fairness: bool
-    leaderboard: bool
-
-
-@dataclass(frozen=True)
 class PlayIntent:
     choice: str | None
     actions: list[int] | None
@@ -40,13 +34,19 @@ class InvalidRulesInputError(ValueError):
     """Raised when deterministic rules cannot accept a play or outcome."""
 
 
-class GameRules(Protocol):
-    """Narrow deterministic behavior required by game orchestration."""
+class GameDefinition(Protocol):
+    """Behavior shared by every registered game."""
 
-    key: GameKey
-    capabilities: GameCapabilities
+    @property
+    def key(self) -> GameKey: ...
 
     def create_challenge(self) -> dict[str, object]: ...
+
+    def reward_value(self, config: GameConfigVersion, outcome: Outcome) -> int: ...
+
+
+class DirectPlayEvaluation(Protocol):
+    """Deterministic evaluation supported by direct-play games only."""
 
     def evaluate(
         self,
@@ -58,7 +58,36 @@ class GameRules(Protocol):
         now: datetime,
     ) -> dict[str, object]: ...
 
-    def reward_value(self, config: GameConfigVersion, outcome: Outcome) -> int: ...
+
+class FairnessConfiguration(Protocol):
+    """Provably-fair configuration supported by fairness games only."""
+
+    def fairness_reward_bands(self, config: GameConfigVersion) -> tuple[RewardBand, ...]: ...
+
+
+class LeaderboardScoreExtraction(Protocol):
+    """Final-score extraction supported by leaderboard games only."""
+
+    def leaderboard_score(self, config: GameConfigVersion, outcome: Outcome) -> int: ...
+
+
+@dataclass(frozen=True)
+class DirectGameEntry:
+    """Registry entry whose outcome is evaluated during direct play."""
+
+    definition: GameDefinition
+    direct_play: DirectPlayEvaluation
+    leaderboard: LeaderboardScoreExtraction | None = None
+    mode: Literal["direct"] = "direct"
+
+
+@dataclass(frozen=True)
+class FairnessGameEntry:
+    """Registry entry whose outcome uses commitment/reveal orchestration."""
+
+    definition: GameDefinition
+    fairness: FairnessConfiguration
+    mode: Literal["fairness"] = "fairness"
 
 
 def _validated_config(config: GameConfigVersion) -> GameConfigPayload:
@@ -68,22 +97,9 @@ def _validated_config(config: GameConfigVersion) -> GameConfigPayload:
 @dataclass(frozen=True)
 class DailySpinRules:
     key: GameKey = GameKey.DAILY_SPIN
-    capabilities: GameCapabilities = GameCapabilities(fairness=True, leaderboard=False)
 
     def create_challenge(self) -> dict[str, object]:
         return {}
-
-    def evaluate(
-        self,
-        *,
-        game_session: GameSession,
-        config: GameConfigVersion,
-        intent: PlayIntent,
-        provider: OutcomeProvider,
-        now: datetime,
-    ) -> dict[str, object]:
-        del game_session, config, intent, provider, now
-        raise InvalidRulesInputError("daily spin requires the fairness lifecycle")
 
     def reward_value(self, config: GameConfigVersion, outcome: Outcome) -> int:
         payload = _validated_config(config)
@@ -95,11 +111,16 @@ class DailySpinRules:
                 return band.value
         raise InvalidRulesInputError("outcome has no configured reward")
 
+    def fairness_reward_bands(self, config: GameConfigVersion) -> tuple[RewardBand, ...]:
+        payload = _validated_config(config)
+        if not isinstance(payload, DailySpinConfig):
+            raise InvalidRulesInputError("configuration does not match daily spin")
+        return tuple(RewardBand(band.key, band.weight, band.value) for band in payload.rewards)
+
 
 @dataclass(frozen=True)
 class PredictionCardRules:
     key: GameKey = GameKey.PREDICTION_CARD
-    capabilities: GameCapabilities = GameCapabilities(fairness=False, leaderboard=False)
 
     def create_challenge(self) -> dict[str, object]:
         return {}
@@ -147,7 +168,6 @@ class PredictionCardRules:
 @dataclass(frozen=True)
 class SkillCheckRules:
     key: GameKey = GameKey.SKILL_CHECK
-    capabilities: GameCapabilities = GameCapabilities(fairness=False, leaderboard=True)
 
     def create_challenge(self) -> dict[str, object]:
         return {"sequence": secure_challenge()}
@@ -187,6 +207,9 @@ class SkillCheckRules:
         }
 
     def reward_value(self, config: GameConfigVersion, outcome: Outcome) -> int:
+        return self.leaderboard_score(config, outcome)
+
+    def leaderboard_score(self, config: GameConfigVersion, outcome: Outcome) -> int:
         payload = _validated_config(config)
         if not isinstance(payload, SkillCheckConfig):
             raise InvalidRulesInputError("configuration does not match skill check")
@@ -200,18 +223,38 @@ class SkillCheckRules:
         return score
 
 
-type RegisteredRules = DailySpinRules | PredictionCardRules | SkillCheckRules
-_RULES: dict[GameKey, RegisteredRules] = {
-    GameKey.DAILY_SPIN: DailySpinRules(),
-    GameKey.PREDICTION_CARD: PredictionCardRules(),
-    GameKey.SKILL_CHECK: SkillCheckRules(),
+type RegisteredGame = DirectGameEntry | FairnessGameEntry
+
+_DAILY_SPIN_RULES = DailySpinRules()
+_PREDICTION_CARD_RULES = PredictionCardRules()
+_SKILL_CHECK_RULES = SkillCheckRules()
+_RULES: dict[GameKey, RegisteredGame] = {
+    GameKey.DAILY_SPIN: FairnessGameEntry(
+        definition=_DAILY_SPIN_RULES,
+        fairness=_DAILY_SPIN_RULES,
+    ),
+    GameKey.PREDICTION_CARD: DirectGameEntry(
+        definition=_PREDICTION_CARD_RULES,
+        direct_play=_PREDICTION_CARD_RULES,
+    ),
+    GameKey.SKILL_CHECK: DirectGameEntry(
+        definition=_SKILL_CHECK_RULES,
+        direct_play=_SKILL_CHECK_RULES,
+        leaderboard=_SKILL_CHECK_RULES,
+    ),
 }
 
 
-def rules_for(game_key: str) -> RegisteredRules:
+def rules_for(game_key: str) -> RegisteredGame:
     """Resolve a supported game and fail closed for unknown identifiers."""
 
     try:
         return _RULES[GameKey(game_key)]
     except (KeyError, ValueError) as error:
         raise InvalidRulesInputError("unsupported game") from error
+
+
+def registered_game_keys() -> frozenset[GameKey]:
+    """Return the complete immutable set of explicitly registered games."""
+
+    return frozenset(_RULES)
