@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from app.models import GameConfigVersion
+from app.rng import RewardBand
 from tools import simulate
 
 pytestmark = pytest.mark.unit
@@ -52,6 +54,29 @@ def test_configuration_validation_detects_missing_daily_spin(
 
     with pytest.raises(simulate.SimulationInputError):
         _ = simulate.seeded_daily_spin_reward_bands()
+
+
+def test_seeded_reward_bands_dispatch_through_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: list[GameConfigVersion] = []
+    requested_game_keys: list[str] = []
+
+    class FairnessFixture:
+        def fairness_reward_bands(self, config: GameConfigVersion) -> tuple[RewardBand, ...]:
+            received.append(config)
+            return (RewardBand("registry", 1, 7),)
+
+    def resolve_fairness(game_key: str) -> FairnessFixture:
+        requested_game_keys.append(game_key)
+        return FairnessFixture()
+
+    monkeypatch.setattr(simulate, "fairness_rules_for", resolve_fairness)
+
+    assert simulate.seeded_daily_spin_reward_bands() == (RewardBand("registry", 1, 7),)
+    assert requested_game_keys == ["daily_spin"]
+    assert len(received) == 1
+    assert received[0].payload["game_type"] == "daily_spin"
 
 
 def test_configuration_validation_detects_malformed_daily_spin(

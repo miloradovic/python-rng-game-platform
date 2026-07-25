@@ -254,6 +254,24 @@ def rules_for(game_key: str) -> RegisteredGame:
         raise InvalidRulesInputError("unsupported game") from error
 
 
+def fairness_rules_for(game_key: str) -> FairnessConfiguration:
+    """Resolve fairness configuration and reject games without that capability."""
+
+    registered_game = rules_for(game_key)
+    if registered_game.mode != "fairness":
+        raise InvalidRulesInputError("game does not support fairness")
+    return registered_game.fairness
+
+
+def leaderboard_rules_for(game_key: str) -> LeaderboardScoreExtraction:
+    """Resolve score extraction and reject games without that capability."""
+
+    registered_game = rules_for(game_key)
+    if registered_game.mode != "direct" or registered_game.leaderboard is None:
+        raise InvalidRulesInputError("game does not support leaderboards")
+    return registered_game.leaderboard
+
+
 def registered_game_keys() -> frozenset[GameKey]:
     """Return the complete immutable set of explicitly registered games."""
 

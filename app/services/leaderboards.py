@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
-from app.game_rules import InvalidRulesInputError, LeaderboardScoreExtraction, rules_for
+from app.game_rules import InvalidRulesInputError, LeaderboardScoreExtraction, leaderboard_rules_for
 from app.models import (
     AuditRecord,
     FinalScore,
@@ -51,22 +51,17 @@ async def _eligible_leaderboard_game(session: AsyncSession, game_key: str) -> Ga
     if not game.is_active:
         raise InactiveGameError
     try:
-        registered_game = rules_for(game.key)
+        leaderboard_rules_for(game.key)
     except InvalidRulesInputError as error:
         raise LeaderboardGameIneligibleError from error
-    if registered_game.mode != "direct" or registered_game.leaderboard is None:
-        raise LeaderboardGameIneligibleError
     return game
 
 
 def _leaderboard_capability(game_key: str) -> LeaderboardScoreExtraction:
     try:
-        registered_game = rules_for(game_key)
+        return leaderboard_rules_for(game_key)
     except InvalidRulesInputError as error:
         raise LeaderboardGameIneligibleError from error
-    if registered_game.mode != "direct" or registered_game.leaderboard is None:
-        raise LeaderboardGameIneligibleError
-    return registered_game.leaderboard
 
 
 async def submit_final_score(

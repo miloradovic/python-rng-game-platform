@@ -20,7 +20,7 @@ from app.fairness_events import (
 from app.fairness_events import (
     revealed_event_payload as _revealed_event_payload,
 )
-from app.game_rules import InvalidRulesInputError, rules_for
+from app.game_rules import InvalidRulesInputError, fairness_rules_for
 from app.models import (
     FairnessProof,
     FairnessProofEvent,
@@ -64,10 +64,7 @@ def _fairness_reward_bands(
     game_key: str, config: GameConfigVersion
 ) -> tuple[FairnessRewardBand, ...]:
     try:
-        registered_game = rules_for(game_key)
-        if registered_game.mode != "fairness":
-            raise InvalidRulesInputError("game does not support fairness")
-        return registered_game.fairness.fairness_reward_bands(config)
+        return fairness_rules_for(game_key).fairness_reward_bands(config)
     except InvalidRulesInputError as error:
         raise InvalidPlayError from error
 

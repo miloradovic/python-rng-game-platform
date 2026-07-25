@@ -14,11 +14,13 @@ from app.game_rules import (
     PlayIntent,
     PredictionCardRules,
     SkillCheckRules,
+    fairness_rules_for,
+    leaderboard_rules_for,
     registered_game_keys,
     rules_for,
 )
 from app.models import GameConfigVersion, GameSession, Outcome
-from app.rng import HmacOutcomeProvider
+from app.rng import HmacOutcomeProvider, daily_spin_mapping_digest
 
 pytestmark = pytest.mark.unit
 
@@ -77,6 +79,17 @@ def test_registry_fails_closed_for_unknown_game() -> None:
         rules_for("unknown")
 
 
+@pytest.mark.parametrize("game_key", [GameKey.DAILY_SPIN, GameKey.PREDICTION_CARD])
+def test_leaderboard_capability_rejects_ineligible_games(game_key: GameKey) -> None:
+    with pytest.raises(InvalidRulesInputError):
+        leaderboard_rules_for(game_key)
+
+
+def test_fairness_capability_rejects_direct_play_game() -> None:
+    with pytest.raises(InvalidRulesInputError):
+        fairness_rules_for(GameKey.PREDICTION_CARD)
+
+
 def test_prediction_rules_are_deterministic() -> None:
     entry = rules_for(GameKey.PREDICTION_CARD)
     assert entry.mode == "direct"
@@ -132,6 +145,22 @@ def test_skill_rules_derive_score_without_infrastructure() -> None:
     assert entry.leaderboard.leaderboard_score(config, outcome) == 666
 
 
+@pytest.mark.parametrize("score", [-1, 1001, True, "100"])
+def test_skill_leaderboard_score_rejects_invalid_outcome(score: object) -> None:
+    config = _config(
+        {
+            "game_type": "skill_check",
+            "cooldown_seconds": 0,
+            "duration_seconds": 30,
+            "max_score": 1000,
+        }
+    )
+    outcome = Outcome(session_id=uuid4(), config_version_id=config.id, result={"score": score})
+
+    with pytest.raises(InvalidRulesInputError):
+        leaderboard_rules_for(GameKey.SKILL_CHECK).leaderboard_score(config, outcome)
+
+
 def test_daily_spin_exposes_real_fairness_configuration_without_direct_play() -> None:
     entry = rules_for(GameKey.DAILY_SPIN)
     assert entry.mode == "fairness"
@@ -152,3 +181,22 @@ def test_daily_spin_exposes_real_fairness_configuration_without_direct_play() ->
         ("a", 1, 1),
         ("b", 2, 2),
     ]
+
+
+def test_seeded_fairness_reward_bands_preserve_mapping_fixed_vector() -> None:
+    config = _config(
+        {
+            "game_type": "daily_spin",
+            "cooldown_seconds": 86400,
+            "rewards": [
+                {"key": "coins_10", "weight": 80, "value": 10},
+                {"key": "coins_50", "weight": 20, "value": 50},
+            ],
+        }
+    )
+
+    bands = fairness_rules_for(GameKey.DAILY_SPIN).fairness_reward_bands(config)
+
+    assert daily_spin_mapping_digest(bands) == (
+        "759a58aa1263a2c7a33e85f7192f1a51d67ad32ef4e95439762fe5717eba4a33"
+    )

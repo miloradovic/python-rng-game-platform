@@ -30,6 +30,26 @@ def _imports(path: Path) -> set[str]:
     return imported
 
 
+def _concrete_game_key_references(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    game_keys = {"daily_spin", "prediction_card", "skill_check"}
+    references = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value in game_keys
+    }
+    references.update(
+        f"GameKey.{node.attr}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "GameKey"
+    )
+    return references
+
+
 def _service_import_graph(root: Path) -> dict[str, set[str]]:
     paths = tuple(path for path in root.glob("*.py") if path.name != "__init__.py")
     known = {f"app.services.{path.stem}" for path in paths}
@@ -116,6 +136,12 @@ def test_dependency_direction_has_no_reverse_imports() -> None:
         )
         for name in transition_imports
     )
+
+
+def test_orchestration_services_do_not_branch_on_concrete_game_keys() -> None:
+    for module_name in ("fairness", "gameplay", "leaderboards", "rewards", "sessions"):
+        path = APP_ROOT / "services" / f"{module_name}.py"
+        assert _concrete_game_key_references(path) == set(), path
 
 
 def test_service_module_import_graph_is_acyclic() -> None:

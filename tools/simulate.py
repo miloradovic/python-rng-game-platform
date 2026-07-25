@@ -18,7 +18,8 @@ from dataclasses import asdict, dataclass
 
 from pydantic import ValidationError
 
-from app.game_rules import GameKey
+from app.game_rules import GameKey, InvalidRulesInputError, fairness_rules_for
+from app.models import GameConfigVersion
 from app.rng import (
     ALGORITHM_HMAC_SHA256,
     DAILY_SPIN_MAPPING_VERSION_V1,
@@ -88,7 +89,16 @@ def seeded_daily_spin_reward_bands() -> tuple[RewardBand, ...]:
     """Load the validated, version-1 daily-spin map used by the seed command."""
 
     config = _seeded_daily_spin_config()
-    return tuple(RewardBand(reward.key, reward.weight, reward.value) for reward in config.rewards)
+    config_version = GameConfigVersion(
+        id=uuid.uuid5(uuid.NAMESPACE_URL, CONFIG_SOURCE),
+        game_id=uuid.uuid5(uuid.NAMESPACE_URL, f"{CONFIG_SOURCE}:game"),
+        version=CONFIG_VERSION,
+        payload=config.model_dump(mode="json"),
+    )
+    try:
+        return fairness_rules_for(config.game_type).fairness_reward_bands(config_version)
+    except InvalidRulesInputError as error:
+        raise SimulationInputError("the seeded game does not support fairness") from error
 
 
 def _seeded_daily_spin_config() -> DailySpinConfig:
