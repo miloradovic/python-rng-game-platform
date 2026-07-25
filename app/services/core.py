@@ -1,4 +1,4 @@
-"""Business use cases and explicit transaction boundaries."""
+"""Service implementations pending extraction into focused use-case modules."""
 
 import hashlib
 import json
@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
+from app.game_rules import GameKey, InvalidRulesInputError, PlayIntent, rules_for
 from app.models import (
     AuditRecord,
     FairnessProof,
@@ -39,7 +40,6 @@ from app.rng import (
     create_server_seed,
     daily_spin_mapping_digest,
     derive_daily_spin,
-    secure_challenge,
     server_seed_commitment,
     verify_daily_spin_proof,
 )
@@ -47,64 +47,26 @@ from app.rng import (
     RewardBand as FairnessRewardBand,
 )
 from app.schemas import game_config_adapter
-
-
-class DomainError(Exception):
-    """Stable domain failure mapped at the HTTP boundary."""
-
-    code = "domain_error"
-
-
-class NotFoundError(DomainError):
-    code = "not_found"
-
-
-class ForbiddenError(DomainError):
-    code = "forbidden"
-
-
-class InactiveGameError(DomainError):
-    code = "game_inactive"
-
-
-class InactivePlayerError(DomainError):
-    code = "player_inactive"
-
-
-class CooldownError(DomainError):
-    code = "cooldown_active"
-
-
-class ActiveSessionError(DomainError):
-    code = "active_session_exists"
-
-
-class InvalidTransitionError(DomainError):
-    code = "invalid_transition"
-
-
-class InvalidPlayError(DomainError):
-    code = "invalid_play"
-
-
-class DailySpinFairnessRequiredError(DomainError):
-    code = "daily_spin_fairness_required"
-
-
-class IdempotencyConflictError(DomainError):
-    code = "idempotency_conflict"
-
-
-class SessionExpiredError(DomainError):
-    code = "session_expired"
-
-
-class RewardUnavailableError(DomainError):
-    code = "reward_unavailable"
-
-
-class InvalidAnalyticsRangeError(DomainError):
-    code = "invalid_analytics_range"
+from app.services.errors import (
+    ActiveSessionError,
+    CooldownError,
+    DailySpinFairnessRequiredError,
+    ForbiddenError,
+    IdempotencyConflictError,
+    InactiveGameError,
+    InactivePlayerError,
+    InvalidAnalyticsRangeError,
+    InvalidPlayError,
+    InvalidTransitionError,
+    LeaderboardEntryNotFoundError,
+    LeaderboardGameIneligibleError,
+    LeaderboardPeriodClosedError,
+    LeaderboardPeriodOpenError,
+    NotFoundError,
+    RewardUnavailableError,
+    SessionExpiredError,
+    SettlementForbiddenError,
+)
 
 
 def utc_now() -> datetime:
@@ -121,18 +83,6 @@ def _request_fingerprint(operation: str, material_input: dict[str, object]) -> s
         ensure_ascii=True,
     )
     return hashlib.sha256(canonical.encode("ascii")).hexdigest()
-
-
-class LeaderboardGameIneligibleError(DomainError):
-    code = "leaderboard_game_ineligible"
-
-
-class LeaderboardPeriodClosedError(DomainError):
-    code = "leaderboard_period_closed"
-
-
-class LeaderboardEntryNotFoundError(DomainError):
-    code = "leaderboard_entry_not_found"
 
 
 def leaderboard_period(completed_at: datetime) -> tuple[datetime, datetime]:
@@ -186,7 +136,11 @@ async def _eligible_leaderboard_game(session: AsyncSession, game_key: str) -> Ga
         raise NotFoundError
     if not game.is_active:
         raise InactiveGameError
-    if game.key != "skill_check":
+    try:
+        rules = rules_for(game.key)
+    except InvalidRulesInputError as error:
+        raise LeaderboardGameIneligibleError from error
+    if not rules.capabilities.leaderboard:
         raise LeaderboardGameIneligibleError
     return game
 
@@ -217,7 +171,11 @@ async def submit_final_score(
     game = await repositories.get_game_by_id(session, game_session.game_id)
     if game is None:
         raise NotFoundError
-    if game.key != "skill_check":
+    try:
+        rules = rules_for(game.key)
+    except InvalidRulesInputError as error:
+        raise LeaderboardGameIneligibleError from error
+    if not rules.capabilities.leaderboard:
         raise LeaderboardGameIneligibleError
     if game_session.status != SessionStatus.COMPLETED or game_session.ended_at is None:
         raise InvalidTransitionError
@@ -228,7 +186,7 @@ async def submit_final_score(
     if config is None:
         raise NotFoundError
     payload = game_config_adapter.validate_python(config.payload)
-    if payload.game_type != "skill_check":
+    if payload.game_type != GameKey.SKILL_CHECK.value:
         raise LeaderboardGameIneligibleError
     value = outcome.result.get("score")
     if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= payload.max_score:
@@ -301,14 +259,6 @@ async def canonical_player_rank(
     if row is None:
         raise LeaderboardEntryNotFoundError
     return row
-
-
-class LeaderboardPeriodOpenError(DomainError):
-    code = "leaderboard_period_open"
-
-
-class SettlementForbiddenError(DomainError):
-    code = "settlement_forbidden"
 
 
 async def settle_leaderboard(
@@ -529,9 +479,10 @@ async def create_session(
     if latest is not None and latest.created_at + timedelta(seconds=payload.cooldown_seconds) > now:
         raise CooldownError
     duration = getattr(payload, "duration_seconds", 300)
-    challenge: dict[str, object] = {}
-    if game.key == "skill_check":
-        challenge = {"sequence": secure_challenge()}
+    try:
+        challenge = rules_for(game.key).create_challenge()
+    except InvalidRulesInputError as error:
+        raise InvalidPlayError from error
     game_session = await repositories.add_session(
         session,
         request_id=request_id,
@@ -548,84 +499,13 @@ async def create_session(
     return game_session
 
 
-def _prediction_result(
-    game_session: GameSession,
-    game_key: str,
-    config: GameConfigVersion,
-    provider: OutcomeProvider,
-    choice: str | None,
-) -> dict[str, object]:
-    payload = game_config_adapter.validate_python(config.payload)
-    if payload.game_type != "prediction_card" or choice not in payload.choices:
-        raise InvalidPlayError
-    derived = provider.uniform(
-        session_id=game_session.id,
-        game_key=game_key,
-        config_version_id=config.id,
-        purpose="prediction_card",
-        upper_bound=len(payload.choices),
-    )
-    authoritative_choice = payload.choices[derived.value]
-    return {
-        "player_choice": choice,
-        "authoritative_choice": authoritative_choice,
-        "correct": choice == authoritative_choice,
-        "normalized_value": derived.value,
-        "derivation_digest": derived.digest_hex,
-    }
-
-
-def _skill_result(
-    game_session: GameSession,
-    config: GameConfigVersion,
-    actions: list[int] | None,
-    now: datetime,
-) -> dict[str, object]:
-    payload = game_config_adapter.validate_python(config.payload)
-    challenge = game_session.challenge.get("sequence")
-    if (
-        payload.game_type != "skill_check"
-        or actions is None
-        or not isinstance(challenge, list)
-        or len(actions) != len(set(actions))
-    ):
-        raise InvalidPlayError
-    correct_prefix = 0
-    for submitted, expected in zip(actions, challenge, strict=False):
-        if submitted != expected:
-            break
-        correct_prefix += 1
-    score = (payload.max_score * correct_prefix) // len(challenge)
-    elapsed_ms = max(0, int((now - game_session.created_at).total_seconds() * 1000))
-    return {
-        "score": score,
-        "correct_actions": correct_prefix,
-        "submitted_actions": len(actions),
-        "elapsed_ms": elapsed_ms,
-    }
-
-
-def reward_value(config: GameConfigVersion, outcome: Outcome) -> int:
+def reward_value(config: GameConfigVersion, outcome: Outcome, game_key: str | None = None) -> int:
     """Derive an entitlement only from an accepted outcome and its immutable config."""
     payload = game_config_adapter.validate_python(config.payload)
-    if payload.game_type == "daily_spin":
-        reward_key = outcome.result.get("reward_key")
-        for band in payload.rewards:
-            if band.key == reward_key:
-                return band.value
-        raise InvalidPlayError
-    if payload.game_type == "prediction_card":
-        return payload.correct_reward if outcome.result.get("correct") is True else 0
-    if payload.game_type == "skill_check":
-        score = outcome.result.get("score")
-        if (
-            not isinstance(score, int)
-            or isinstance(score, bool)
-            or not 0 <= score <= payload.max_score
-        ):
-            raise InvalidPlayError
-        return score
-    raise InvalidPlayError
+    try:
+        return rules_for(game_key or payload.game_type).reward_value(config, outcome)
+    except InvalidRulesInputError as error:
+        raise InvalidPlayError from error
 
 
 def claim_reward(reward: Reward, now: datetime) -> bool:
@@ -669,21 +549,25 @@ async def play_session(
     config = await repositories.get_config_by_id(session, game_session.config_version_id)
     if game is None or config is None or config.game_id != game.id:
         raise NotFoundError
-    if game.key == "daily_spin":
+    try:
+        rules = rules_for(game.key)
+    except InvalidRulesInputError as error:
+        raise InvalidPlayError from error
+    if rules.capabilities.fairness:
         raise DailySpinFairnessRequiredError
-    elif game.key == "prediction_card":
-        if actions is not None:
-            raise InvalidPlayError
-        result = _prediction_result(game_session, game.key, config, provider, choice)
-    elif game.key == "skill_check":
-        if choice is not None:
-            raise InvalidPlayError
-        result = _skill_result(game_session, config, actions, now)
-    else:
-        raise InvalidPlayError
+    try:
+        result = rules.evaluate(
+            game_session=game_session,
+            config=config,
+            intent=PlayIntent(choice=choice, actions=actions),
+            provider=provider,
+            now=now,
+        )
+    except InvalidRulesInputError as error:
+        raise InvalidPlayError from error
     outcome = await repositories.add_outcome(session, game_session, result)
     reward = await repositories.add_reward(
-        session, outcome, player_id=owner_id, value=reward_value(config, outcome)
+        session, outcome, player_id=owner_id, value=reward_value(config, outcome, game.key)
     )
     game_session.status = SessionStatus.COMPLETED
     game_session.ended_at = now
