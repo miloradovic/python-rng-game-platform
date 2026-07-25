@@ -658,7 +658,7 @@ async def test_settlement_ranks_unique_players_by_deterministic_best_score() -> 
 async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() -> None:
     database = Database(get_settings())
     player_id = uuid4()
-    period_start = datetime(2026, 7, 20, tzinfo=UTC)
+    period_start = datetime(2026, 7, 13, tzinfo=UTC)
     settlement_time = period_start + timedelta(days=7)
     try:
         async with database.session_factory.begin() as session:

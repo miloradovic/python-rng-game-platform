@@ -54,7 +54,8 @@ docker compose -f compose.yaml -f compose.test.yaml run --rm app pytest
 ```
 
 Pytest migrates and clears only `db_test`; development migrations remain an
-explicit `docker compose run --rm app alembic upgrade head`. Stop development
+explicit `docker compose run --rm app alembic upgrade head`. The suite measures
+branch coverage across `app` and `tools` and fails below 80%. Stop development
 with `docker compose down`. Stop the test stack with
 `docker compose -f compose.yaml -f compose.test.yaml down`; add `--volumes` only
 when you intentionally want to remove both development and test container data.
