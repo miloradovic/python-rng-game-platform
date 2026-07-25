@@ -18,9 +18,12 @@ behavior.
 - Docker and Docker Compose are the only project runtime dependencies on the
   host. Do not run Python, uv, Alembic, pytest, Ruff, mypy, PostgreSQL, Redis,
   or project tools directly on the host.
-- Use the existing Compose services only. Start the stack with
-  `docker compose up --build -d`; run one-off commands with
-  `docker compose run --rm app <command>`.
+- Use the existing Compose services only. Start the ordinary stack with
+  `docker compose up --build -d`; it contains only runtime services. Start the
+  isolated quality-test stack with
+  `docker compose -f compose.yaml -f compose.test.yaml up --build -d --wait`.
+  Run ordinary one-off commands with `docker compose run --rm app <command>`
+  and quality checks with both Compose files.
 - The supported runtime is Python 3.14 (`pyproject.toml` and `Dockerfile`).
   Dependencies and container images are pinned in `pyproject.toml`/`uv.lock`
   and Compose/Dockerfile; update the manifest, lockfile, image, tests, and docs
@@ -28,10 +31,10 @@ behavior.
 - The standard checks are:
 
   ```console
-  docker compose run --rm app ruff format --check .
-  docker compose run --rm app ruff check .
-  docker compose run --rm app mypy app tests tools
-  docker compose run --rm app pytest
+  docker compose -f compose.yaml -f compose.test.yaml run --rm app ruff format --check .
+  docker compose -f compose.yaml -f compose.test.yaml run --rm app ruff check .
+  docker compose -f compose.yaml -f compose.test.yaml run --rm app mypy app tests tools
+  docker compose -f compose.yaml -f compose.test.yaml run --rm app pytest
   ```
 
 - Apply schema changes through reviewed Alembic migrations. Use

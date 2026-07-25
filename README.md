@@ -34,14 +34,30 @@ to an ignored `.env` only when local values need changing—never commit secrets
 
 ## Common commands
 
+Ordinary development commands use `compose.yaml` and never create or wait for
+the test database:
+
 ```console
-docker compose run --rm app ruff format --check .
-docker compose run --rm app ruff check .
-docker compose run --rm app mypy app tests tools
-docker compose run --rm app pytest
 docker compose run --rm app alembic check
 docker compose run --rm app python -m tools.simulate daily_spin --runs 100000
 ```
+
+Quality checks use the explicit test overlay. Starting this stack waits for the
+separate `db_test` database and supplies its isolated URL to the test suite:
+
+```console
+docker compose -f compose.yaml -f compose.test.yaml up --build -d --wait
+docker compose -f compose.yaml -f compose.test.yaml run --rm app ruff format --check .
+docker compose -f compose.yaml -f compose.test.yaml run --rm app ruff check .
+docker compose -f compose.yaml -f compose.test.yaml run --rm app mypy app tests tools
+docker compose -f compose.yaml -f compose.test.yaml run --rm app pytest
+```
+
+Pytest migrates and clears only `db_test`; development migrations remain an
+explicit `docker compose run --rm app alembic upgrade head`. Stop development
+with `docker compose down`. Stop the test stack with
+`docker compose -f compose.yaml -f compose.test.yaml down`; add `--volumes` only
+when you intentionally want to remove both development and test container data.
 
 ## API at a glance
 

@@ -14,8 +14,6 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rng_app}:${POSTGRES_PASSWORD:-local-password}@db:5432/${POSTGRES_DB:-rng_game_platform}
       REDIS_URL: redis://redis:6379/0
-      TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rng_app}:${POSTGRES_PASSWORD:-local-password}@db_test:5432/${TEST_POSTGRES_DB:-rng_game_platform_test}
-      TEST_REDIS_URL: redis://redis:6379/1
       LEADERBOARD_PROJECTION_HMAC_SECRET: ${LEADERBOARD_PROJECTION_HMAC_SECRET:-development-only-projection-key-32-bytes-minimum}
       LEADERBOARD_PROJECTION_PREVIOUS_HMAC_SECRET: ${LEADERBOARD_PROJECTION_PREVIOUS_HMAC_SECRET:-}
       OUTCOME_HMAC_SECRET: ${OUTCOME_HMAC_SECRET:-development-only-outcome-key-32-bytes-minimum}
@@ -35,9 +33,6 @@ services:
       db:
         condition: service_healthy
         restart: true
-      db_test:
-        condition: service_healthy
-        restart: true
     networks:
       - backend
     restart: "no"
@@ -51,27 +46,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-password}
     volumes:
       - postgres_data:/var/lib/postgresql
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-    networks:
-      - backend
-    restart: "no"
-    stop_grace_period: 30s
-
-  db_test:
-    image: postgres:18.4-bookworm
-    environment:
-      POSTGRES_DB: ${TEST_POSTGRES_DB:-rng_game_platform_test}
-      POSTGRES_USER: ${POSTGRES_USER:-rng_app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-password}
-    volumes:
-      - postgres_test_data:/var/lib/postgresql
     healthcheck:
       test:
         - CMD-SHELL
@@ -112,5 +86,4 @@ networks:
 
 volumes:
   postgres_data:
-  postgres_test_data:
   redis_data:

@@ -15,38 +15,53 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Build and start the canonical stack
-        run: docker compose up --build -d --wait
+      - name: Validate ordinary and test Compose workflows
+        run: |
+          docker compose config --quiet
+          if docker compose config --services | grep -Fx db_test; then
+            echo "db_test must not be part of the ordinary application stack"
+            exit 1
+          fi
+          docker compose -f compose.yaml -f compose.test.yaml config --quiet
+          docker compose -f compose.yaml -f compose.test.yaml config --services | grep -Fx db_test
+
+      - name: Smoke-test the ordinary application stack
+        run: |
+          docker compose up --build -d --wait
+          docker compose down
+
+      - name: Build and start the explicit test stack
+        run: docker compose -f compose.yaml -f compose.test.yaml up --build -d --wait
 
       - name: Apply and inspect migrations
         run: |
-          docker compose run --rm app alembic upgrade head
-          docker compose run --rm app alembic current
+          docker compose -f compose.yaml -f compose.test.yaml run --rm app alembic upgrade head
+          docker compose -f compose.yaml -f compose.test.yaml run --rm app alembic current
 
       - name: Validate empty-schema migration downgrade and restoration
         run: |
-          docker compose run --rm app alembic downgrade base
-          docker compose run --rm app alembic upgrade head
+          docker compose -f compose.yaml -f compose.test.yaml run --rm app alembic downgrade base
+          docker compose -f compose.yaml -f compose.test.yaml run --rm app alembic upgrade head
 
       - name: Verify formatting
-        run: docker compose run --rm app ruff format --check .
+        run: docker compose -f compose.yaml -f compose.test.yaml run --rm app ruff format --check .
 
       - name: Lint
-        run: docker compose run --rm app ruff check .
+        run: docker compose -f compose.yaml -f compose.test.yaml run --rm app ruff check .
 
       - name: Type check
-        run: docker compose run --rm app mypy app tests tools
+        run: docker compose -f compose.yaml -f compose.test.yaml run --rm app mypy app tests tools
 
       - name: Detect metadata and migration drift
-        run: docker compose run --rm app alembic check
+        run: docker compose -f compose.yaml -f compose.test.yaml run --rm app alembic check
 
       - name: Test
-        run: docker compose run --rm app pytest
+        run: docker compose -f compose.yaml -f compose.test.yaml run --rm app pytest
 
       - name: Show service logs after failure
         if: failure()
-        run: docker compose logs --no-color
+        run: docker compose -f compose.yaml -f compose.test.yaml logs --no-color
 
       - name: Stop stack
         if: always()
-        run: docker compose down --volumes
+        run: docker compose -f compose.yaml -f compose.test.yaml down --volumes
