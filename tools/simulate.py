@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 
 from pydantic import ValidationError
 
+from app.game_rules import GameKey
 from app.rng import (
     ALGORITHM_HMAC_SHA256,
     DAILY_SPIN_MAPPING_VERSION_V1,
@@ -92,13 +93,13 @@ def seeded_daily_spin_reward_bands() -> tuple[RewardBand, ...]:
 
 def _seeded_daily_spin_config() -> DailySpinConfig:
     for key, _name, _description, payload in CATALOGUE:
-        if key != "daily_spin":
+        if key != GameKey.DAILY_SPIN.value:
             continue
         try:
             config = game_config_adapter.validate_python(payload)
         except ValidationError as error:
             raise SimulationInputError("the seeded daily_spin configuration is invalid") from error
-        if config.game_type != "daily_spin":
+        if config.game_type != GameKey.DAILY_SPIN.value:
             raise SimulationInputError("the seeded daily_spin payload has the wrong game type")
         return config
     raise SimulationInputError("the seeded daily_spin configuration is unavailable")
@@ -139,7 +140,7 @@ def simulate_daily_spin(runs: int = DEFAULT_RUNS) -> SimulationReport:
     )
     return SimulationReport(
         simulation_version=SIMULATION_VERSION,
-        game_key="daily_spin",
+        game_key=GameKey.DAILY_SPIN.value,
         runs=runs,
         protocol_version=PROTOCOL_VERSION_V1,
         algorithm=ALGORITHM_HMAC_SHA256,
@@ -206,7 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the narrow command-line interface required by the roadmap."""
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("game_key", choices=("daily_spin",))
+    parser.add_argument("game_key", choices=(GameKey.DAILY_SPIN.value,))
     parser.add_argument("--runs", type=int, default=DEFAULT_RUNS, help="number of derived outcomes")
     return parser
 

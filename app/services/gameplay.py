@@ -1,5 +1,97 @@
 """Server-authoritative gameplay orchestration."""
 
-from app.services.core import play_session, retrieve_outcome_audit
+import uuid
+from collections.abc import Callable
+from datetime import datetime
 
-__all__ = ["play_session", "retrieve_outcome_audit"]
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app import repositories
+from app.game_rules import InvalidRulesInputError, PlayIntent, rules_for
+from app.models import FairnessProofStatus, Outcome, SessionStatus
+from app.rng import OutcomeProvider
+from app.services._common import _owned_outcome, utc_now
+from app.services.errors import (
+    DailySpinFairnessRequiredError,
+    ForbiddenError,
+    InvalidPlayError,
+    InvalidTransitionError,
+    NotFoundError,
+    SessionExpiredError,
+)
+from app.services.fairness import end_committed_fairness_proof as _end_committed_fairness_proof
+from app.services.rewards import reward_value
+from app.services.sessions import expire_if_due
+
+
+async def play_session(
+    session: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    choice: str | None,
+    actions: list[int] | None,
+    provider: OutcomeProvider,
+    clock: Callable[[], datetime] = utc_now,
+) -> Outcome:
+    game_session = await repositories.lock_session(session, session_id)
+    if game_session is None:
+        raise NotFoundError
+    if game_session.player_id != owner_id:
+        raise ForbiddenError
+    now = clock()
+    if expire_if_due(game_session, now):
+        existing = await repositories.lock_fairness_proof_by_session(session, game_session.id)
+        if existing is not None:
+            await _end_committed_fairness_proof(
+                session, existing, status=FairnessProofStatus.EXPIRED, now=now
+            )
+        await session.commit()
+        raise SessionExpiredError
+    if game_session.status != SessionStatus.ACTIVE:
+        raise InvalidTransitionError
+    game = await repositories.get_game_by_id(session, game_session.game_id)
+    config = await repositories.get_config_by_id(session, game_session.config_version_id)
+    if game is None or config is None or config.game_id != game.id:
+        raise NotFoundError
+    try:
+        rules = rules_for(game.key)
+    except InvalidRulesInputError as error:
+        raise InvalidPlayError from error
+    if rules.capabilities.fairness:
+        raise DailySpinFairnessRequiredError
+    try:
+        result = rules.evaluate(
+            game_session=game_session,
+            config=config,
+            intent=PlayIntent(choice=choice, actions=actions),
+            provider=provider,
+            now=now,
+        )
+    except InvalidRulesInputError as error:
+        raise InvalidPlayError from error
+    outcome = await repositories.add_outcome(session, game_session, result)
+    reward = await repositories.add_reward(
+        session, outcome, player_id=owner_id, value=reward_value(config, outcome, game.key)
+    )
+    game_session.status = SessionStatus.COMPLETED
+    game_session.ended_at = now
+    await repositories.add_outcome_audit(session, outcome, player_id=owner_id, game_key=game.key)
+    await repositories.add_game_played_event(
+        session, outcome, player_id=owner_id, game_key=game.key
+    )
+    await repositories.add_reward_evidence(
+        session, reward, event_type="reward_issued", game_key=game.key
+    )
+    await session.commit()
+    return outcome
+
+
+async def retrieve_outcome_audit(
+    session: AsyncSession, outcome_id: uuid.UUID, owner_id: uuid.UUID
+) -> tuple[Outcome, dict[str, object]]:
+    outcome, _ = await _owned_outcome(session, outcome_id=outcome_id, owner_id=owner_id)
+    audit = await repositories.get_outcome_audit(session, outcome_id)
+    if audit is None:
+        raise NotFoundError
+    return outcome, audit.evidence

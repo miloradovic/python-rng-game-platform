@@ -1,37 +1,7 @@
 """Stable public service API."""
 
-from app.services.core import (
-    RevealedFairnessProof,
-    _request_fingerprint,
-    active_config,
-    analytics_game_summary,
-    cancel_active,
-    cancel_session,
-    canonical_leaderboard,
-    canonical_player_rank,
-    catalogue,
-    claim_reward,
-    claim_session_reward,
-    commit_fairness,
-    create_player,
-    create_session,
-    evaluate_fairness,
-    expire_if_due,
-    leaderboard_period,
-    play_session,
-    player_rewards,
-    retrieve_fairness_proof,
-    retrieve_outcome_audit,
-    retrieve_player,
-    retrieve_session,
-    reward_value,
-    settle_leaderboard,
-    submit_final_score,
-    utc_now,
-    validate_analytics_range,
-    verify_fairness_event_chain,
-    verify_fairness_proof,
-)
+from app.services._common import _request_fingerprint, utc_now
+from app.services.analytics import analytics_game_summary, validate_analytics_range
 from app.services.errors import (
     ActiveSessionError,
     CooldownError,
@@ -52,6 +22,31 @@ from app.services.errors import (
     RewardUnavailableError,
     SessionExpiredError,
     SettlementForbiddenError,
+)
+from app.services.fairness import (
+    RevealedFairnessProof,
+    commit_fairness,
+    evaluate_fairness,
+    retrieve_fairness_proof,
+    verify_fairness_event_chain,
+    verify_fairness_proof,
+)
+from app.services.gameplay import play_session, retrieve_outcome_audit
+from app.services.leaderboards import (
+    canonical_leaderboard,
+    canonical_player_rank,
+    leaderboard_period,
+    settle_leaderboard,
+    submit_final_score,
+)
+from app.services.players import active_config, catalogue, create_player, retrieve_player
+from app.services.rewards import claim_reward, claim_session_reward, player_rewards, reward_value
+from app.services.sessions import (
+    cancel_active,
+    cancel_session,
+    create_session,
+    expire_if_due,
+    retrieve_session,
 )
 
 __all__ = [

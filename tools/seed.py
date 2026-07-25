@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import Database
+from app.game_rules import GameKey
 from app.logging import configure_logging
 from app.models import ConfigStatus, Game, GameConfigVersion
 from app.schemas import game_config_adapter
@@ -19,11 +20,11 @@ logger = logging.getLogger(__name__)
 
 CATALOGUE: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
     (
-        "daily_spin",
+        GameKey.DAILY_SPIN.value,
         "Daily Spin",
         "A once-daily weighted reward spin.",
         {
-            "game_type": "daily_spin",
+            "game_type": GameKey.DAILY_SPIN.value,
             "cooldown_seconds": 86400,
             "rewards": [
                 {"key": "coins_10", "weight": 80, "value": 10},
@@ -32,22 +33,22 @@ CATALOGUE: tuple[tuple[str, str, str, dict[str, Any]], ...] = (
         },
     ),
     (
-        "prediction_card",
+        GameKey.PREDICTION_CARD.value,
         "Prediction Card",
         "Predict the server-owned card result.",
         {
-            "game_type": "prediction_card",
+            "game_type": GameKey.PREDICTION_CARD.value,
             "cooldown_seconds": 300,
             "choices": ["red", "black"],
             "correct_reward": 25,
         },
     ),
     (
-        "skill_check",
+        GameKey.SKILL_CHECK.value,
         "Skill Check",
         "Submit input evaluated against server-owned timing rules.",
         {
-            "game_type": "skill_check",
+            "game_type": GameKey.SKILL_CHECK.value,
             "cooldown_seconds": 60,
             "duration_seconds": 30,
             "max_score": 1000,
