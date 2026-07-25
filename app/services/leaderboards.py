@@ -152,6 +152,33 @@ async def canonical_leaderboard(
     return game, scores
 
 
+async def leaderboard_projection_facts(
+    session: AsyncSession,
+    *,
+    owner_id: uuid.UUID,
+    game_key: str,
+    period_start: datetime,
+    player_id: uuid.UUID | None = None,
+) -> tuple[Game, int, int]:
+    """Authorize a read and return only durable projection validation facts."""
+
+    if player_id is not None and player_id != owner_id:
+        raise ForbiddenError
+    player = await repositories.get_player(session, owner_id)
+    if player is None:
+        raise NotFoundError
+    if player.status != PlayerStatus.ACTIVE:
+        raise InactivePlayerError
+    game = await _eligible_leaderboard_game(session, game_key)
+    count = await repositories.count_canonical_scores(
+        session, game_id=game.id, period_start=period_start
+    )
+    revision = await repositories.leaderboard_projection_revision(
+        session, game_id=game.id, period_start=period_start
+    )
+    return game, count, revision
+
+
 async def canonical_player_rank(
     session: AsyncSession,
     *,

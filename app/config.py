@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     database_url: SecretStr
     redis_url: SecretStr | None = None
     redis_key_namespace: str = ""
+    leaderboard_projection_hmac_secret: SecretStr | None = None
+    leaderboard_projection_previous_hmac_secret: SecretStr | None = None
     outcome_hmac_secret: SecretStr
     settlement_admin_token: SecretStr | None = None
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
@@ -104,6 +106,13 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("leaderboard_projection_previous_hmac_secret", mode="before")
+    @classmethod
+    def empty_previous_projection_secret_is_unset(cls, value: object) -> object:
+        """Allow an empty rotation slot without treating it as a weak key."""
+
+        return None if value == "" else value
+
     @model_validator(mode="after")
     def validate_connection_schemes(self) -> Self:
         """Reject connection URLs incompatible with the selected async clients."""
@@ -116,6 +125,20 @@ class Settings(BaseSettings):
             redis_url = self.redis_url.get_secret_value()
             if not redis_url.startswith(("redis://", "rediss://")):
                 raise ValueError("REDIS_URL must use the redis or rediss scheme")
+            if self.leaderboard_projection_hmac_secret is None:
+                raise ValueError(
+                    "LEADERBOARD_PROJECTION_HMAC_SECRET is required when Redis is configured"
+                )
+
+        projection_secrets = (
+            self.leaderboard_projection_hmac_secret,
+            self.leaderboard_projection_previous_hmac_secret,
+        )
+        if any(
+            secret is not None and len(secret.get_secret_value()) < 32
+            for secret in projection_secrets
+        ):
+            raise ValueError("leaderboard projection HMAC secrets require at least 32 characters")
 
         if self.app_env is AppEnvironment.PRODUCTION:
             parsed_database = urlparse(database_url)
@@ -150,6 +173,15 @@ class Settings(BaseSettings):
             if settlement_token == "development-only-settlement-token":  # noqa: S105
                 raise ValueError(
                     "production SETTLEMENT_ADMIN_TOKEN cannot use the development value"
+                )
+            projection_secret = self.leaderboard_projection_hmac_secret
+            if (
+                projection_secret is not None
+                and projection_secret.get_secret_value()
+                == "development-only-projection-key-32-bytes-minimum"
+            ):
+                raise ValueError(
+                    "production LEADERBOARD_PROJECTION_HMAC_SECRET cannot use the development value"
                 )
         return self
 

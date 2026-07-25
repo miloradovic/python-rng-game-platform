@@ -16,6 +16,7 @@ def test_settings_accept_async_connection_schemes() -> None:
         app_env="test",
         database_url="postgresql+asyncpg://user:password@db:5432/database",
         redis_url="redis://redis:6379/0",
+        leaderboard_projection_hmac_secret="p" * 32,
         outcome_hmac_secret="x" * 32,
     )
 
@@ -79,11 +80,40 @@ def test_production_accepts_explicit_secure_configuration() -> None:
         app_env="production",
         database_url="postgresql+asyncpg://rng_app:strong-password@db/database?ssl=require",
         redis_url="rediss://redis/0",
+        leaderboard_projection_hmac_secret="p" * 32,
         outcome_hmac_secret="o" * 32,
         settlement_admin_token="s" * 32,
     )
 
     assert settings.app_env is AppEnvironment.PRODUCTION
+
+
+def test_redis_requires_projection_integrity_key() -> None:
+    """Redis cannot be configured without keyed projection validation."""
+
+    with pytest.raises(ValidationError, match="LEADERBOARD_PROJECTION_HMAC_SECRET"):
+        Settings(
+            _env_file=None,
+            database_url="postgresql+asyncpg://user:password@db/database",
+            redis_url="redis://redis/1",
+            leaderboard_projection_hmac_secret=None,
+            outcome_hmac_secret="o" * 32,
+        )
+
+
+def test_production_rejects_development_projection_key() -> None:
+    with pytest.raises(ValidationError, match="cannot use the development value"):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            database_url="postgresql+asyncpg://rng_app:strong-password@db/database?ssl=require",
+            redis_url="rediss://redis/0",
+            leaderboard_projection_hmac_secret=(  # noqa: S106
+                "development-only-projection-key-32-bytes-minimum"
+            ),
+            outcome_hmac_secret="o" * 32,
+            settlement_admin_token="s" * 32,
+        )
 
 
 @pytest.mark.parametrize(

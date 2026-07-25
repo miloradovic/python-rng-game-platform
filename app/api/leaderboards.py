@@ -101,7 +101,15 @@ async def submit_score(
     return FinalScoreResponse.model_validate(score)
 
 
-@router.get("/leaderboards/{game_key}", response_model=LeaderboardResponse)
+@router.get(
+    "/leaderboards/{game_key}",
+    response_model=LeaderboardResponse,
+    description=(
+        "Return the requested canonical ordering. A Redis source is reported only after "
+        "the generation matches PostgreSQL revision/count facts and passes keyed integrity "
+        "validation; every other condition falls back to PostgreSQL."
+    ),
+)
 async def get_leaderboard(
     game_key: str,
     session: Session,
@@ -130,7 +138,14 @@ async def get_leaderboard(
     )
 
 
-@router.get("/players/{player_id}/rank", response_model=PlayerRankResponse)
+@router.get(
+    "/players/{player_id}/rank",
+    response_model=PlayerRankResponse,
+    description=(
+        "Return the authenticated player's canonical rank. Redis is optional and is used "
+        "only for a current, integrity-validated generation."
+    ),
+)
 async def get_player_rank(
     player_id: UUID,
     session: Session,

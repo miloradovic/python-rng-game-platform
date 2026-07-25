@@ -111,5 +111,6 @@ def settings() -> Settings:
         database_url=_test_database_url(),
         redis_url=os.environ["TEST_REDIS_URL"],
         redis_key_namespace=_TEST_REDIS_NAMESPACE,
+        leaderboard_projection_hmac_secret="p" * 32,
         outcome_hmac_secret="x" * 32,
     )

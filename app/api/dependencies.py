@@ -44,10 +44,11 @@ def get_metrics(request: Request) -> MetricsRegistry:
 def get_projection_reader(
     client: Annotated[Redis | None, Depends(get_redis)],
     metrics: Annotated[MetricsRegistry, Depends(get_metrics)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> LeaderboardProjectionReader:
     """Create the focused cache-consistency policy for one request."""
 
-    return LeaderboardProjectionReader(client, metrics)
+    return LeaderboardProjectionReader.from_settings(client, settings, metrics)
 
 
 def get_player_id(header_player_id: Annotated[UUID, Header(alias="X-Player-ID")]) -> UUID:

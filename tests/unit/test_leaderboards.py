@@ -1,4 +1,4 @@
-"""Deterministic leaderboard period and Redis encoding tests."""
+"""Deterministic leaderboard period and Redis integrity tests."""
 
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -7,7 +7,11 @@ from uuid import uuid4
 import pytest
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
-from app.cache import leaderboard_member, parse_leaderboard_member, projected_page
+from app.cache import (
+    ProjectionGeneration,
+    ProjectionIntegrity,
+    projected_page,
+)
 from app.services import leaderboard_period
 
 pytestmark = pytest.mark.unit
@@ -19,35 +23,99 @@ def test_iso_week_period_boundaries_are_utc() -> None:
     assert end == datetime(2026, 7, 20, tzinfo=UTC)
 
 
-def test_projection_member_round_trips_total_order_fields() -> None:
-    session_id, score_id, player_id = (str(uuid4()) for _ in range(3))
-    member = leaderboard_member(
-        completed_at_us=123, session_id=session_id, score_id=score_id, player_id=player_id
+def test_projection_member_round_trips_authenticated_order_fields() -> None:
+    integrity = ProjectionIntegrity("p" * 32)
+    contract = ProjectionGeneration(
+        game_key="skill_check",
+        period_start="20260720T000000Z",
+        generation=str(uuid4()),
+        revision=1,
+        count=1,
+        key_id=integrity.current_key_id,
     )
-    assert parse_leaderboard_member(member) == (123, session_id, score_id, player_id)
+    session_id, score_id, player_id = (str(uuid4()) for _ in range(3))
+    member = integrity.member(
+        contract,
+        completed_at_us=123,
+        session_id=session_id,
+        score_id=score_id,
+        player_id=player_id,
+        final_score=99,
+        rank=1,
+    )
+
+    assert integrity.parse_member(contract, member, -99.0) == (
+        123,
+        session_id,
+        score_id,
+        player_id,
+        99,
+        1,
+    )
+    assert integrity.parse_member(contract, member, -100.0) is None
 
 
-class _TimeoutPipeline:
-    async def __aenter__(self) -> _TimeoutPipeline:
-        return self
+def test_projection_metadata_supports_previous_key_during_rotation() -> None:
+    old = ProjectionIntegrity("o" * 32)
+    verifier = ProjectionIntegrity("n" * 32, "o" * 32)
+    generation = str(uuid4())
+    contract = ProjectionGeneration(
+        game_key="skill_check",
+        period_start="20260720T000000Z",
+        generation=generation,
+        revision=3,
+        count=2,
+        key_id=old.current_key_id,
+    )
 
-    async def __aexit__(self, *args: object) -> None:
-        del args
+    assert (
+        verifier.verify_metadata(
+            old.metadata(contract),
+            game_key=contract.game_key,
+            period_start=contract.period_start,
+            generation=generation,
+            expected_revision=3,
+            expected_count=2,
+        )
+        == contract
+    )
 
-    def hgetall(self, key: str) -> None:
-        del key
 
-    def zcard(self, key: str) -> None:
-        del key
+@pytest.mark.parametrize(
+    ("expected_revision", "expected_count"),
+    [(4, 2), (3, 3)],
+)
+def test_projection_metadata_rejects_durable_fact_mismatch(
+    expected_revision: int, expected_count: int
+) -> None:
+    integrity = ProjectionIntegrity("p" * 32)
+    generation = str(uuid4())
+    contract = ProjectionGeneration(
+        game_key="skill_check",
+        period_start="20260720T000000Z",
+        generation=generation,
+        revision=3,
+        count=2,
+        key_id=integrity.current_key_id,
+    )
 
-    async def execute(self) -> list[object]:
-        raise RedisTimeoutError
+    assert (
+        integrity.verify_metadata(
+            integrity.metadata(contract),
+            game_key=contract.game_key,
+            period_start=contract.period_start,
+            generation=generation,
+            expected_revision=expected_revision,
+            expected_count=expected_count,
+        )
+        is None
+    )
 
 
 class _TimeoutRedis:
-    def pipeline(self, *, transaction: bool) -> _TimeoutPipeline:
-        del transaction
-        return _TimeoutPipeline()
+    async def get(self, key: str) -> str | None:
+        del key
+        raise RedisTimeoutError
 
 
 async def test_projection_timeout_falls_back_without_raising() -> None:
@@ -55,6 +123,7 @@ async def test_projection_timeout_falls_back_without_raising() -> None:
 
     result = await projected_page(
         cast(Any, _TimeoutRedis()),
+        ProjectionIntegrity("p" * 32),
         game_key="skill_check",
         period_start="20260720T000000Z",
         offset=0,

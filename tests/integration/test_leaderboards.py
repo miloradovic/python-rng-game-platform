@@ -8,11 +8,18 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
+from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories, services
-from app.cache import create_redis_client, leaderboard_key
+from app.cache import (
+    ProjectionKeys,
+    create_redis_client,
+    leaderboard_key,
+    leaderboard_pointer_key,
+    projection_generation_keys,
+)
 from app.config import get_settings
 from app.database import Database, get_session
 from app.main import create_app
@@ -32,10 +39,20 @@ from app.models import (
     SettlementStatus,
 )
 from app.rng import HmacOutcomeProvider
-from tools.rebuild_leaderboard import _mapping, rebuild_leaderboard
+from tools.rebuild_leaderboard import rebuild_leaderboard
 from tools.seed import seed_catalogue
 
 pytestmark = pytest.mark.integration
+
+
+async def _current_projection_keys(
+    redis: Redis, game_key: str, period_start: datetime
+) -> ProjectionKeys:
+    period_key = period_start.strftime("%Y%m%dT%H%M%SZ")
+    pointer = leaderboard_pointer_key(game_key, period_key)
+    generation = await redis.get(pointer)
+    assert isinstance(generation, str)
+    return projection_generation_keys(game_key, period_key, generation)
 
 
 async def _completed_skill_session(
@@ -160,7 +177,9 @@ async def test_rebuild_matches_postgresql_and_is_repeatable() -> None:
                 session, game_id=game.id, period_start=score.period_start
             )
             await redis.delete(
-                leaderboard_key("skill_check", score.period_start.strftime("%Y%m%dT%H%M%SZ"))
+                leaderboard_pointer_key(
+                    "skill_check", score.period_start.strftime("%Y%m%dT%H%M%SZ")
+                )
             )
             first = await rebuild_leaderboard(
                 session, redis, game_key="skill_check", period_start=score.period_start
@@ -175,7 +194,9 @@ async def test_rebuild_matches_postgresql_and_is_repeatable() -> None:
         await database.dispose()
 
 
-async def test_api_projects_after_commit_and_falls_back_when_projection_is_missing() -> None:
+async def test_api_projection_hit_skips_canonical_query_and_corruption_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     database = Database(get_settings())
     redis = create_redis_client(get_settings())
     assert redis is not None
@@ -207,11 +228,6 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
             assert retried.status_code == 200
             assert retried.json() == created.json()
             period_start = created.json()["period_start"]
-            key = leaderboard_key(
-                "skill_check",
-                datetime.fromisoformat(period_start).strftime("%Y%m%dT%H%M%SZ"),
-            )
-            await redis.delete(key)
             fallback = await client.get(
                 "/api/v1/leaderboards/skill_check",
                 headers=headers,
@@ -230,11 +246,22 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
                     game_key="skill_check",
                     period_start=datetime.fromisoformat(period_start).astimezone(UTC),
                 )
-            projected_page = await client.get(
-                "/api/v1/leaderboards/skill_check",
-                headers=headers,
-                params={"period_start": period_start},
-            )
+            period = datetime.fromisoformat(period_start).astimezone(UTC)
+            keys = await _current_projection_keys(redis, "skill_check", period)
+
+            async def reject_canonical_query(*args: object, **kwargs: object) -> object:
+                del args, kwargs
+                raise AssertionError("canonical PostgreSQL page query executed on Redis hit")
+
+            with monkeypatch.context() as projection_spy:
+                projection_spy.setattr(
+                    repositories, "list_canonical_scores", reject_canonical_query
+                )
+                projected_page = await client.get(
+                    "/api/v1/leaderboards/skill_check",
+                    headers=headers,
+                    params={"period_start": period_start},
+                )
             assert projected_page.status_code == 200
             assert projected_page.json()["source"] == "redis"
             assert projected_page.json()["items"] == fallback.json()["items"]
@@ -248,13 +275,13 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
             assert projected.json()["source"] == "redis"
             assert projected.json()["entry"]["score_id"] == created.json()["id"]
 
-            # Preserve cardinality and metadata while corrupting the sole member.
+            # A score mutation preserves cardinality but invalidates member integrity.
             projected_rows = cast(
-                list[tuple[str, float]], await redis.zrange(key, 0, 0, withscores=True)
+                list[tuple[str, float]],
+                await redis.zrange(keys.members, 0, 0, withscores=True),
             )
             member, redis_score = projected_rows[0]
-            await redis.zrem(key, member)
-            await redis.zadd(key, {"corrupt:member:with:same-cardinality": redis_score})
+            await redis.zadd(keys.members, {member: redis_score - 1})
             corrupted = await client.get(
                 "/api/v1/leaderboards/skill_check",
                 headers=headers,
@@ -265,7 +292,48 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
             assert any(
                 item["score_id"] == created.json()["id"] for item in corrupted.json()["items"]
             )
-            await redis.zadd(key, {"extra:corrupt:member:value": -1})
+
+            async with database.session_factory() as session:
+                await rebuild_leaderboard(
+                    session, redis, game_key="skill_check", period_start=period
+                )
+            keys = await _current_projection_keys(redis, "skill_check", period)
+            projected_rows = cast(
+                list[tuple[str, float]],
+                await redis.zrange(keys.members, 0, 0, withscores=True),
+            )
+            member, redis_score = projected_rows[0]
+            await redis.zrem(keys.members, member)
+            await redis.zadd(
+                keys.members,
+                {"corrupt:member:with:same-cardinality": redis_score},
+            )
+            replaced = await client.get(
+                "/api/v1/leaderboards/skill_check",
+                headers=headers,
+                params={"period_start": period_start},
+            )
+            assert replaced.json()["source"] == "postgresql"
+
+            async with database.session_factory() as session:
+                await rebuild_leaderboard(
+                    session, redis, game_key="skill_check", period_start=period
+                )
+            keys = await _current_projection_keys(redis, "skill_check", period)
+            await redis.hset(keys.metadata, "signature", "0" * 64)
+            invalid_metadata = await client.get(
+                "/api/v1/leaderboards/skill_check",
+                headers=headers,
+                params={"period_start": period_start},
+            )
+            assert invalid_metadata.json()["source"] == "postgresql"
+
+            async with database.session_factory() as session:
+                await rebuild_leaderboard(
+                    session, redis, game_key="skill_check", period_start=period
+                )
+            keys = await _current_projection_keys(redis, "skill_check", period)
+            await redis.zadd(keys.members, {"extra:corrupt:member:value": -1})
             extra = await client.get(
                 "/api/v1/leaderboards/skill_check",
                 headers=headers,
@@ -273,6 +341,125 @@ async def test_api_projects_after_commit_and_falls_back_when_projection_is_missi
             )
             assert extra.status_code == 200
             assert extra.json()["source"] == "postgresql"
+
+            async with database.session_factory() as session:
+                await rebuild_leaderboard(
+                    session, redis, game_key="skill_check", period_start=period
+                )
+            keys = await _current_projection_keys(redis, "skill_check", period)
+            member = cast(list[str], await redis.zrange(keys.members, 0, 0))[0]
+            await redis.zrem(keys.members, member)
+            missing = await client.get(
+                "/api/v1/leaderboards/skill_check",
+                headers=headers,
+                params={"period_start": period_start},
+            )
+            assert missing.json()["source"] == "postgresql"
+
+            async with database.session_factory() as session:
+                await rebuild_leaderboard(
+                    session, redis, game_key="skill_check", period_start=period
+                )
+            keys = await _current_projection_keys(redis, "skill_check", period)
+            await redis.hset(keys.players, str(player_id), "malformed-player-member")
+            corrupted_rank = await client.get(
+                f"/api/v1/players/{player_id}/rank",
+                headers=headers,
+                params={"game_key": "skill_check", "period_start": period_start},
+            )
+            assert corrupted_rank.json()["source"] == "postgresql"
+
+            await redis.set(
+                leaderboard_pointer_key("skill_check", period.strftime("%Y%m%dT%H%M%SZ")),
+                str(uuid4()),
+            )
+            stale_generation = await client.get(
+                "/api/v1/leaderboards/skill_check",
+                headers=headers,
+                params={"period_start": period_start},
+            )
+            assert stale_generation.json()["source"] == "postgresql"
+    finally:
+        await redis.aclose()
+        await database.dispose()
+
+
+async def test_projection_page_boundaries_match_postgresql() -> None:
+    """First, middle, partial, and empty pages are identical on a Redis hit."""
+
+    database = Database(get_settings())
+    redis = create_redis_client(get_settings())
+    assert redis is not None
+    player_ids = [uuid4() for _ in range(5)]
+    try:
+        async with database.session_factory.begin() as session:
+            await seed_catalogue(session)
+            session.add_all(
+                [
+                    Player(id=player_id, display_name=f"Page {index}")
+                    for index, player_id in enumerate(player_ids)
+                ]
+            )
+        score_period: datetime | None = None
+        for player_id in player_ids:
+            game_session, _ = await _completed_skill_session(database, player_id)
+            async with database.session_factory() as session:
+                score, _ = await services.submit_final_score(
+                    session, session_id=game_session.id, owner_id=player_id
+                )
+                score_period = score.period_start
+        assert score_period is not None
+        application = create_app(get_settings())
+
+        async def override_session() -> AsyncIterator[AsyncSession]:
+            async with database.session_factory() as session:
+                yield session
+
+        application.dependency_overrides[get_session] = override_session
+        application.state.redis = redis
+        headers = {"X-Player-ID": str(player_ids[0])}
+        offsets = (0, 2, 4, 10_000)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application), base_url="http://test"
+        ) as client:
+            canonical = [
+                await client.get(
+                    "/api/v1/leaderboards/skill_check",
+                    headers=headers,
+                    params={
+                        "period_start": score_period.isoformat(),
+                        "cursor": offset,
+                        "limit": 2,
+                    },
+                )
+                for offset in offsets
+            ]
+            assert all(response.json()["source"] == "postgresql" for response in canonical)
+            async with database.session_factory() as session:
+                await rebuild_leaderboard(
+                    session,
+                    redis,
+                    game_key="skill_check",
+                    period_start=score_period,
+                )
+            projected = [
+                await client.get(
+                    "/api/v1/leaderboards/skill_check",
+                    headers=headers,
+                    params={
+                        "period_start": score_period.isoformat(),
+                        "cursor": offset,
+                        "limit": 2,
+                    },
+                )
+                for offset in offsets
+            ]
+
+        assert all(response.json()["source"] == "redis" for response in projected)
+        assert [response.json()["items"] for response in projected] == [
+            response.json()["items"] for response in canonical
+        ]
+        assert projected[-1].json()["items"] == []
     finally:
         await redis.aclose()
         await database.dispose()
@@ -427,23 +614,33 @@ async def test_rebuild_removes_corruption_and_preserves_projection_isolation() -
                 session, session_id=game_session.id, owner_id=player_id
             )
             period_key = score.period_start.strftime("%Y%m%dT%H%M%SZ")
-            target = leaderboard_key("skill_check", period_key)
             unrelated = leaderboard_key("daily_spin", period_key)
-            await redis.zadd(target, {"corrupt-member": -1_000_000})
-            await redis.zadd(unrelated, {"unrelated-member": -7})
             game = await repositories.get_game(session, "skill_check")
             assert game is not None
-            expected = await repositories.list_canonical_scores(
+            expected_count = await repositories.count_canonical_scores(
                 session, game_id=game.id, period_start=score.period_start
             )
-            assert await rebuild_leaderboard(
-                session, redis, game_key="skill_check", period_start=score.period_start
-            ) == len(expected)
+            assert (
+                await rebuild_leaderboard(
+                    session, redis, game_key="skill_check", period_start=score.period_start
+                )
+                == expected_count
+            )
+            old_keys = await _current_projection_keys(redis, "skill_check", score.period_start)
+            await redis.zadd(old_keys.members, {"corrupt-member": -1_000_000})
+            await redis.set(unrelated, "unrelated")
+            assert (
+                await rebuild_leaderboard(
+                    session, redis, game_key="skill_check", period_start=score.period_start
+                )
+                == expected_count
+            )
+            new_keys = await _current_projection_keys(redis, "skill_check", score.period_start)
 
-        assert await redis.zrange(target, 0, -1, withscores=True) == [
-            (member, float(value)) for member, value in map(_mapping, expected)
-        ]
-        assert await redis.zrange(unrelated, 0, -1, withscores=True) == [("unrelated-member", -7.0)]
+        assert new_keys != old_keys
+        assert 0 < await redis.ttl(old_keys.members) <= 300
+        assert await redis.zcard(new_keys.members) == expected_count
+        assert await redis.get(unrelated) == "unrelated"
     finally:
         await redis.aclose()
         await database.dispose()
@@ -456,11 +653,9 @@ async def test_empty_and_concurrent_rebuilds_converge_safely() -> None:
     redis = create_redis_client(get_settings())
     assert redis is not None
     period_start = datetime(2100, 1, 4, tzinfo=UTC)
-    target = leaderboard_key("skill_check", period_start.strftime("%Y%m%dT%H%M%SZ"))
     try:
         async with database.session_factory.begin() as session:
             await seed_catalogue(session)
-        await redis.zadd(target, {"stale-member": -100})
 
         async def rebuild() -> int:
             async with database.session_factory() as session:
@@ -469,7 +664,9 @@ async def test_empty_and_concurrent_rebuilds_converge_safely() -> None:
                 )
 
         assert sorted(await asyncio.gather(rebuild(), rebuild())) == [0, 0]
-        assert await redis.exists(target) == 0
+        keys = await _current_projection_keys(redis, "skill_check", period_start)
+        assert await redis.zcard(keys.members) == 0
+        assert await redis.exists(keys.metadata) == 1
     finally:
         await redis.aclose()
         await database.dispose()

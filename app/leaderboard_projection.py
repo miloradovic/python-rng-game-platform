@@ -7,8 +7,14 @@ from uuid import UUID
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import repositories, services
-from app.cache import parse_leaderboard_member, projected_page, projected_player_rank
+from app import services
+from app.cache import (
+    ProjectionIntegrity,
+    projected_page,
+    projected_player_rank,
+    projection_integrity,
+)
+from app.config import Settings
 from app.models import FinalScore
 from app.observability import MetricsRegistry
 from app.schemas import LeaderboardEntry
@@ -42,8 +48,10 @@ def _database_entry(score: FinalScore, rank: int) -> LeaderboardEntry:
     )
 
 
-def _projected_entry(member: str, score: int, rank: int) -> LeaderboardEntry:
-    completed_us, session_id, score_id, player_id = parse_leaderboard_member(member)
+def _projected_entry(
+    row: tuple[int, str, str, str, int, int],
+) -> LeaderboardEntry:
+    completed_us, session_id, score_id, player_id, score, rank = row
     return LeaderboardEntry(
         rank=rank,
         score_id=UUID(score_id),
@@ -55,11 +63,26 @@ def _projected_entry(member: str, score: int, rank: int) -> LeaderboardEntry:
 
 
 class LeaderboardProjectionReader:
-    """Use Redis only when PostgreSQL proves the requested result is identical."""
+    """Use Redis only after PostgreSQL validates its complete generation."""
 
-    def __init__(self, client: Redis | None, metrics: MetricsRegistry | None = None) -> None:
+    def __init__(
+        self,
+        client: Redis | None,
+        integrity: ProjectionIntegrity | None,
+        metrics: MetricsRegistry | None = None,
+    ) -> None:
         self._client = client
+        self._integrity = integrity
         self._metrics = metrics
+
+    @classmethod
+    def from_settings(
+        cls,
+        client: Redis | None,
+        settings: Settings,
+        metrics: MetricsRegistry | None = None,
+    ) -> LeaderboardProjectionReader:
+        return cls(client, projection_integrity(settings), metrics)
 
     def _record_source(self, source: str) -> None:
         if self._metrics is not None:
@@ -77,25 +100,15 @@ class LeaderboardProjectionReader:
         offset: int,
         limit: int,
     ) -> LeaderboardPage:
-        game, scores = await services.canonical_leaderboard(
+        _, count, revision = await services.leaderboard_projection_facts(
             session,
             owner_id=owner_id,
             game_key=game_key,
             period_start=period_start,
-            limit=limit + 1,
-            offset=offset,
-        )
-        canonical = [
-            _database_entry(score, offset + index + 1) for index, score in enumerate(scores)
-        ]
-        count = await repositories.count_canonical_scores(
-            session, game_id=game.id, period_start=period_start
-        )
-        revision = await repositories.leaderboard_projection_revision(
-            session, game_id=game.id, period_start=period_start
         )
         projected = await projected_page(
             self._client,
+            self._integrity,
             game_key=game_key,
             period_start=period_start.strftime("%Y%m%dT%H%M%SZ"),
             offset=offset,
@@ -103,19 +116,27 @@ class LeaderboardProjectionReader:
             expected_count=count,
             expected_revision=revision,
         )
-        try:
-            projected_entries = (
-                [_projected_entry(member, score, rank) for member, score, rank in projected]
-                if projected is not None
-                else None
+        if projected is not None:
+            try:
+                selected = [_projected_entry(row) for row in projected]
+            except OverflowError, TypeError, ValueError:
+                selected = []
+                projected = None
+        if projected is None:
+            _, scores = await services.canonical_leaderboard(
+                session,
+                owner_id=owner_id,
+                game_key=game_key,
+                period_start=period_start,
+                limit=limit + 1,
+                offset=offset,
             )
-        except OverflowError, TypeError, ValueError:
-            projected_entries = None
-        use_projection = projected_entries == canonical
-        selected = (
-            projected_entries if use_projection and projected_entries is not None else canonical
-        )
-        source = "redis" if use_projection else "postgresql"
+            selected = [
+                _database_entry(score, offset + index + 1) for index, score in enumerate(scores)
+            ]
+            source = "postgresql"
+        else:
+            source = "redis"
         self._record_source(source)
         return LeaderboardPage(
             source=source,
@@ -132,35 +153,38 @@ class LeaderboardProjectionReader:
         game_key: str,
         period_start: datetime,
     ) -> LeaderboardRank:
-        score, rank = await services.canonical_player_rank(
+        _, count, revision = await services.leaderboard_projection_facts(
             session,
-            player_id=player_id,
             owner_id=owner_id,
+            player_id=player_id,
             game_key=game_key,
             period_start=period_start,
         )
-        canonical = _database_entry(score, rank)
-        count = await repositories.count_canonical_scores(
-            session, game_id=score.game_id, period_start=period_start
-        )
-        revision = await repositories.leaderboard_projection_revision(
-            session, game_id=score.game_id, period_start=period_start
-        )
         projected = await projected_player_rank(
             self._client,
+            self._integrity,
             game_key=game_key,
             period_start=period_start.strftime("%Y%m%dT%H%M%SZ"),
             player_id=str(player_id),
             expected_count=count,
             expected_revision=revision,
         )
-        try:
-            candidate = _projected_entry(*projected) if projected is not None else None
-        except OverflowError, TypeError, ValueError:
-            candidate = None
-        source = "redis" if candidate == canonical else "postgresql"
+        if projected is not None:
+            try:
+                entry = _projected_entry(projected)
+            except OverflowError, TypeError, ValueError:
+                projected = None
+        if projected is None:
+            score, rank = await services.canonical_player_rank(
+                session,
+                player_id=player_id,
+                owner_id=owner_id,
+                game_key=game_key,
+                period_start=period_start,
+            )
+            entry = _database_entry(score, rank)
+            source = "postgresql"
+        else:
+            source = "redis"
         self._record_source(source)
-        return LeaderboardRank(
-            source=source,
-            entry=candidate if candidate == canonical and candidate is not None else canonical,
-        )
+        return LeaderboardRank(source=source, entry=entry)
