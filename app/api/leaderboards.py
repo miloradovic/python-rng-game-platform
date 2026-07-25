@@ -52,6 +52,12 @@ def _period_start(value: datetime) -> datetime:
 @router.post(
     "/leaderboards/{game_key}/settle",
     response_model=SettlementResponse,
+    description=(
+        "Settle a closed ISO week using one deterministic best score per player. "
+        "Unique players receive contiguous ranks; equal scores use earliest completion "
+        "time and then session ID as tie-breakers. Each recipient's score_id identifies "
+        "the exact score that established the rank."
+    ),
 )
 async def settle_leaderboard(
     game_key: str,
@@ -105,9 +111,11 @@ async def submit_score(
     "/leaderboards/{game_key}",
     response_model=LeaderboardResponse,
     description=(
-        "Return the requested canonical ordering. A Redis source is reported only after "
-        "the generation matches PostgreSQL revision/count facts and passes keyed integrity "
-        "validation; every other condition falls back to PostgreSQL."
+        "Return the requested canonical score-entry ordering, which may contain multiple "
+        "scores from one player and intentionally differs from unique-player settlement "
+        "ranking. A Redis source is reported only after the generation matches PostgreSQL "
+        "revision/count facts and passes keyed integrity validation; every other condition "
+        "falls back to PostgreSQL."
     ),
 )
 async def get_leaderboard(

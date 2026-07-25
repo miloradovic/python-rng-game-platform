@@ -78,6 +78,57 @@ async def _completed_skill_session(
     return game_session, outcome
 
 
+async def _add_settlement_score(
+    session: AsyncSession,
+    *,
+    player_id: UUID,
+    game_id: UUID,
+    config_version_id: UUID,
+    period_start: datetime,
+    completed_at: datetime,
+    final_score: int,
+    session_id: UUID,
+) -> FinalScore:
+    game_session = GameSession(
+        id=session_id,
+        player_id=player_id,
+        game_id=game_id,
+        config_version_id=config_version_id,
+        request_id=uuid4(),
+        request_fingerprint="b" * 64,
+        status=SessionStatus.COMPLETED,
+        expires_at=period_start + timedelta(days=6),
+        ended_at=completed_at,
+        challenge={},
+    )
+    session.add(game_session)
+    await session.flush()
+    outcome = Outcome(
+        id=uuid4(),
+        session_id=game_session.id,
+        player_id=player_id,
+        game_id=game_id,
+        config_version_id=config_version_id,
+        status=OutcomeStatus.ACCEPTED,
+        result={"score": final_score},
+    )
+    session.add(outcome)
+    await session.flush()
+    score = FinalScore(
+        player_id=player_id,
+        game_id=game_id,
+        session_id=game_session.id,
+        outcome_id=outcome.id,
+        config_version_id=config_version_id,
+        period_start=period_start,
+        completed_at=completed_at,
+        final_score=final_score,
+    )
+    session.add(score)
+    await session.flush()
+    return score
+
+
 async def test_score_submission_is_server_derived_and_evidenced() -> None:
     database = Database(get_settings())
     player_id = uuid4()
@@ -465,10 +516,149 @@ async def test_projection_page_boundaries_match_postgresql() -> None:
         await database.dispose()
 
 
+async def test_settlement_ranks_unique_players_by_deterministic_best_score() -> None:
+    database = Database(get_settings())
+    period_start = datetime(2026, 7, 6, tzinfo=UTC)
+    settlement_time = period_start + timedelta(days=7)
+    player_ids = [uuid4() for _ in range(4)]
+    try:
+        async with database.session_factory.begin() as session:
+            await seed_catalogue(session)
+            session.add_all(
+                Player(id=player_id, display_name=f"Ranked Player {index}")
+                for index, player_id in enumerate(player_ids, start=1)
+            )
+            await session.flush()
+            game = await repositories.get_game(session, "skill_check")
+            assert game is not None
+            config = await repositories.get_active_config(session, game.id)
+            assert config is not None
+
+            first_player_later_session = await _add_settlement_score(
+                session,
+                player_id=player_ids[0],
+                game_id=game.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=period_start + timedelta(days=1),
+                final_score=1000,
+                session_id=UUID(int=2),
+            )
+            first_player_best = await _add_settlement_score(
+                session,
+                player_id=player_ids[0],
+                game_id=game.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=period_start + timedelta(days=1),
+                final_score=1000,
+                session_id=UUID(int=1),
+            )
+            await _add_settlement_score(
+                session,
+                player_id=player_ids[1],
+                game_id=game.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=period_start + timedelta(days=2),
+                final_score=900,
+                session_id=UUID(int=20),
+            )
+            await _add_settlement_score(
+                session,
+                player_id=player_ids[3],
+                game_id=game.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=period_start + timedelta(days=3),
+                final_score=800,
+                session_id=UUID(int=40),
+            )
+            await _add_settlement_score(
+                session,
+                player_id=player_ids[2],
+                game_id=game.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=period_start + timedelta(days=3),
+                final_score=800,
+                session_id=UUID(int=30),
+            )
+            session.add(
+                RewardTierConfig(
+                    id=uuid4(),
+                    game_id=game.id,
+                    version=2,
+                    payload={
+                        "tiers": [
+                            {
+                                "key": f"rank_{rank}",
+                                "min_rank": rank,
+                                "max_rank": rank,
+                                "reward_value": 500 - rank,
+                            }
+                            for rank in range(1, 5)
+                        ]
+                    },
+                    published_at=period_start,
+                )
+            )
+
+        async with database.session_factory() as session:
+            run, recipients = await services.settle_leaderboard(
+                session,
+                game_key="skill_check",
+                period_start=period_start,
+                authorized=True,
+                clock=lambda: settlement_time,
+            )
+        async with database.session_factory() as session:
+            retried_run, retried_recipients = await services.settle_leaderboard(
+                session,
+                game_key="skill_check",
+                period_start=period_start,
+                authorized=True,
+                clock=lambda: settlement_time,
+            )
+
+        assert first_player_later_session.id != first_player_best.id
+        assert [recipient.rank for recipient in recipients] == [1, 2, 3, 4]
+        assert [recipient.player_id for recipient in recipients] == player_ids
+        assert recipients[0].score_id == first_player_best.id
+        assert [recipient.tier_key for recipient in recipients] == [
+            "rank_1",
+            "rank_2",
+            "rank_3",
+            "rank_4",
+        ]
+        assert retried_run.id == run.id
+        assert [
+            (
+                recipient.id,
+                recipient.player_id,
+                recipient.score_id,
+                recipient.rank,
+                recipient.reward_value,
+            )
+            for recipient in retried_recipients
+        ] == [
+            (
+                recipient.id,
+                recipient.player_id,
+                recipient.score_id,
+                recipient.rank,
+                recipient.reward_value,
+            )
+            for recipient in recipients
+        ]
+    finally:
+        await database.dispose()
+
+
 async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() -> None:
     database = Database(get_settings())
     player_id = uuid4()
-    period_start = datetime(2026, 7, 6, tzinfo=UTC)
+    period_start = datetime(2026, 7, 20, tzinfo=UTC)
     settlement_time = period_start + timedelta(days=7)
     try:
         async with database.session_factory.begin() as session:
@@ -517,11 +707,21 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
             )
             session.add(score)
             await session.flush()
+            await _add_settlement_score(
+                session,
+                player_id=player_id,
+                game_id=game.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=period_start + timedelta(days=2),
+                final_score=800,
+                session_id=uuid4(),
+            )
             session.add(
                 RewardTierConfig(
                     id=uuid4(),
                     game_id=game.id,
-                    version=1,
+                    version=3,
                     payload={
                         "tiers": [
                             {
@@ -577,6 +777,7 @@ async def test_closed_period_settlement_is_concurrent_and_reward_idempotent() ->
         results = await asyncio.gather(settle(), settle())
         assert results[0][0].id == results[1][0].id
         assert len(results[0][1]) == 1
+        assert results[0][1][0].score_id == score.id
         async with database.session_factory() as session:
             rewards = await session.scalar(
                 select(func.count())

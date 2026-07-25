@@ -208,7 +208,7 @@ async def settle_leaderboard(
     authorized: bool,
     clock: Callable[[], datetime] = utc_now,
 ) -> tuple[SettlementRun, list[SettlementRecipient]]:
-    """Settle canonical PostgreSQL ranks exactly once for a closed period."""
+    """Settle deterministic unique-player PostgreSQL ranks once for a closed period."""
 
     if not authorized:
         raise SettlementForbiddenError
@@ -255,15 +255,12 @@ async def settle_leaderboard(
         tiers = run.tier_snapshot.get("tiers")
         if not isinstance(tiers, list):
             raise InvalidPlayError
-    scores = await repositories.list_canonical_scores(
+    scores = await repositories.list_settlement_scores(
         session, game_id=game.id, period_start=period_start
     )
     existing_recipients = await repositories.settlement_recipients(session, run.id)
     recipients_by_score = {recipient.score_id: recipient for recipient in existing_recipients}
-    seen_players: set[uuid.UUID] = set()
     for rank, score in enumerate(scores, start=1):
-        if score.player_id in seen_players:
-            continue
         tier = next(
             (
                 item
@@ -301,7 +298,6 @@ async def settle_leaderboard(
             await repositories.add_reward_evidence(
                 session, reward, event_type="settlement_reward_issued", game_key=game.key
             )
-        seen_players.add(score.player_id)
     run.status = SettlementStatus.COMPLETED
     run.completed_at = now
     recipients = await repositories.settlement_recipients(session, run.id)

@@ -3,9 +3,11 @@
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Integer, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import (
     AnalyticsEvent,
@@ -225,7 +227,7 @@ async def add_final_score_evidence(
     )
 
 
-def _ranking_order() -> tuple[object, ...]:
+def _ranking_order() -> tuple[ColumnElement[Any], ...]:
     return (
         FinalScore.final_score.desc(),
         FinalScore.completed_at.asc(),
@@ -271,6 +273,37 @@ async def list_canonical_scores(
     if limit is not None:
         statement = statement.limit(limit)
     return list(await session.scalars(statement))
+
+
+async def list_settlement_scores(
+    session: AsyncSession,
+    *,
+    game_id: uuid.UUID,
+    period_start: datetime,
+) -> list[FinalScore]:
+    """Return each player's deterministic best score in canonical rank order."""
+
+    ranked_for_player = (
+        select(
+            FinalScore.id.label("score_id"),
+            func.row_number()
+            .over(
+                partition_by=FinalScore.player_id,
+                order_by=_ranking_order(),
+            )
+            .label("player_score_rank"),
+        )
+        .where(FinalScore.game_id == game_id, FinalScore.period_start == period_start)
+        .subquery()
+    )
+    return list(
+        await session.scalars(
+            select(FinalScore)
+            .join(ranked_for_player, ranked_for_player.c.score_id == FinalScore.id)
+            .where(ranked_for_player.c.player_score_rank == 1)
+            .order_by(*_ranking_order())
+        )
+    )
 
 
 async def count_canonical_scores(

@@ -14,7 +14,7 @@ It has no payments, cash value, wagering, KYC, or claim of regulatory compliance
 - Atomic session expiration that terminally expires committed fairness proofs,
   appends their hash-chained terminal event, and removes unrevealed seed custody.
 - PostgreSQL as the durable authority; Redis only as a rebuildable leaderboard projection.
-- Idempotent reward claims, score submissions, and closed-period settlement.
+- Idempotent reward claims, score submissions, and unique-player closed-period settlement.
 
 The seeded games are `daily_spin`, `prediction_card`, and `skill_check`. Only the
 server-derived `skill_check` result is eligible for the leaderboard.
@@ -65,6 +65,13 @@ when you intentionally want to remove both development and test container data.
 - `POST /api/v1/fairness/commit` and `/fairness/evaluate`; retrieve or verify a proof by outcome.
 - `POST /api/v1/scores`; read leaderboard and authenticated player rank.
 - `POST /api/v1/leaderboards/skill_check/settle` for an authorized, closed ISO week.
+
+The public leaderboard is score-entry-based, so one player may appear more than
+once. Settlement intentionally ranks unique players instead: each player contributes
+only their best eligible score for the closed period. Settlement ranks are contiguous,
+and both best-score selection and ties between players use the canonical order:
+higher score, then earlier completion time, then lower session ID. Every durable
+recipient retains the exact source score that established their rank.
 
 All player-owned operations use the demo `X-Player-ID` boundary. Settlement additionally
 requires `X-Settlement-Token`. These are local demo controls, not production authentication.
