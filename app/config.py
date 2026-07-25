@@ -5,7 +5,7 @@ from functools import lru_cache
 from typing import Literal, Self
 from urllib.parse import parse_qs, urlparse
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +15,48 @@ class AppEnvironment(StrEnum):
     DEVELOPMENT = "development"
     TEST = "test"
     PRODUCTION = "production"
+
+
+def validate_test_redis_url(test_url: str, development_url: str | None) -> str:
+    """Return a dedicated test Redis URL, rejecting development targets."""
+
+    parsed = urlparse(test_url)
+    if parsed.scheme not in {"redis", "rediss"}:
+        raise ValueError("TEST_REDIS_URL must use the redis or rediss scheme")
+    try:
+        database = int(parsed.path.removeprefix("/") or "0")
+    except ValueError as error:
+        raise ValueError("TEST_REDIS_URL must select a numeric Redis database") from error
+    if database == 0:
+        raise ValueError("TEST_REDIS_URL must not target Redis database 0")
+    if database < 0:
+        raise ValueError("TEST_REDIS_URL must select a positive Redis database")
+
+    if development_url is not None:
+        development = urlparse(development_url)
+        test_target = (
+            parsed.scheme.lower(),
+            parsed.hostname,
+            parsed.port or 6379,
+            parsed.username,
+            parsed.password,
+            database,
+        )
+        try:
+            development_database = int(development.path.removeprefix("/") or "0")
+        except ValueError:
+            development_database = -1
+        development_target = (
+            development.scheme.lower(),
+            development.hostname,
+            development.port or 6379,
+            development.username,
+            development.password,
+            development_database,
+        )
+        if test_target == development_target:
+            raise ValueError("TEST_REDIS_URL must not match the development Redis URL")
+    return test_url
 
 
 class Settings(BaseSettings):
@@ -37,6 +79,7 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_url: SecretStr
     redis_url: SecretStr | None = None
+    redis_key_namespace: str = ""
     outcome_hmac_secret: SecretStr
     settlement_admin_token: SecretStr | None = None
     database_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
@@ -46,6 +89,20 @@ class Settings(BaseSettings):
     database_statement_timeout_ms: int = Field(default=5000, ge=100, le=120000)
     database_lock_timeout_ms: int = Field(default=2000, ge=100, le=60000)
     redis_connect_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+
+    @field_validator("redis_key_namespace")
+    @classmethod
+    def validate_redis_key_namespace(cls, value: str) -> str:
+        """Keep configured namespaces safe for exact prefix scanning."""
+
+        valid_characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        if value and (
+            len(value) > 96 or any(character not in valid_characters for character in value)
+        ):
+            raise ValueError(
+                "REDIS_KEY_NAMESPACE must contain only letters, digits, hyphens, and underscores"
+            )
+        return value
 
     @model_validator(mode="after")
     def validate_connection_schemes(self) -> Self:

@@ -5,7 +5,7 @@ from typing import Any, cast
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.config import Settings
+from app.config import Settings, get_settings
 
 
 def create_redis_client(settings: Settings) -> Redis | None:
@@ -32,15 +32,39 @@ async def redis_is_available(client: Redis | None) -> bool | None:
         return False
 
 
-def leaderboard_key(game_key: str, period_start: str) -> str:
+def _namespaced_key(key: str, namespace: str | None = None) -> str:
+    resolved = get_settings().redis_key_namespace if namespace is None else namespace
+    return f"{resolved}:{key}" if resolved else key
+
+
+def leaderboard_key(game_key: str, period_start: str, *, namespace: str | None = None) -> str:
     """Return the isolated sorted-set key for one game and ISO-week."""
-    return f"leaderboard:v1:{game_key}:{period_start}"
+    return _namespaced_key(f"leaderboard:v1:{game_key}:{period_start}", namespace)
 
 
-def leaderboard_metadata_key(game_key: str, period_start: str) -> str:
+def leaderboard_metadata_key(
+    game_key: str, period_start: str, *, namespace: str | None = None
+) -> str:
     """Return projection metadata isolated with the sorted set generation."""
 
-    return f"{leaderboard_key(game_key, period_start)}:metadata"
+    return f"{leaderboard_key(game_key, period_start, namespace=namespace)}:metadata"
+
+
+async def clear_redis_namespace(client: Redis, namespace: str, *, batch_size: int = 100) -> int:
+    """Delete only keys owned by one nonempty namespace."""
+
+    if not namespace:
+        raise ValueError("a nonempty Redis namespace is required for cleanup")
+    deleted = 0
+    keys: list[str] = []
+    async for key in client.scan_iter(match=f"{namespace}:*", count=batch_size):
+        keys.append(key)
+        if len(keys) >= batch_size:
+            deleted += int(await client.delete(*keys))
+            keys.clear()
+    if keys:
+        deleted += int(await client.delete(*keys))
+    return deleted
 
 
 def leaderboard_member(

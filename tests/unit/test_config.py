@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.config import AppEnvironment, Settings
+from app.config import AppEnvironment, Settings, validate_test_redis_url
 
 pytestmark = pytest.mark.unit
 
@@ -84,3 +84,27 @@ def test_production_accepts_explicit_secure_configuration() -> None:
     )
 
     assert settings.app_env is AppEnvironment.PRODUCTION
+
+
+@pytest.mark.parametrize(
+    ("test_url", "development_url", "message"),
+    [
+        ("redis://redis:6379/0", "redis://redis:6379/0", "database 0"),
+        ("redis://redis:6379", "redis://redis:6379/0", "database 0"),
+        ("redis://redis:6379/1", "redis://redis:6379/1", "development Redis URL"),
+    ],
+)
+def test_test_redis_url_rejects_unsafe_targets(
+    test_url: str, development_url: str, message: str
+) -> None:
+    """Tests fail closed before connecting to development Redis."""
+
+    with pytest.raises(ValueError, match=message):
+        validate_test_redis_url(test_url, development_url)
+
+
+def test_test_redis_url_accepts_dedicated_nonzero_database() -> None:
+    assert (
+        validate_test_redis_url("redis://redis:6379/1", "redis://redis:6379/0")
+        == "redis://redis:6379/1"
+    )
