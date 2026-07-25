@@ -51,10 +51,10 @@ async def test_create_session_retry_commits_once_without_repeating_the_command(
     get_game.assert_not_awaited()
 
 
-async def test_retrieve_session_never_commits_even_when_reporting_effective_expiry(
+async def test_retrieve_session_commits_when_it_durably_finalizes_expiry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Queries can report effective lifecycle state without owning a durable transaction."""
+    """A read that discovers expiry owns and commits the durable terminal transaction."""
 
     now = datetime(2026, 1, 1, tzinfo=UTC)
     player_id = uuid4()
@@ -70,14 +70,17 @@ async def test_retrieve_session_never_commits_even_when_reporting_effective_expi
         challenge={},
     )
     session = AsyncMock()
-    monkeypatch.setattr(repositories, "get_session", AsyncMock(return_value=game_session))
+    monkeypatch.setattr(repositories, "lock_session", AsyncMock(return_value=game_session))
+    monkeypatch.setattr(
+        repositories, "lock_fairness_proof_by_session", AsyncMock(return_value=None)
+    )
 
     result = await services.retrieve_session(
         session, session_id=game_session.id, owner_id=player_id, clock=lambda: now
     )
 
     assert result.status is SessionStatus.EXPIRED
-    session.commit.assert_not_awaited()
+    session.commit.assert_awaited_once()
 
 
 @pytest.mark.parametrize(

@@ -96,20 +96,22 @@ async def lock_session_request_id(session: AsyncSession, request_id: uuid.UUID) 
     await session.scalar(select(func.pg_advisory_xact_lock(lock_key)))
 
 
-async def expire_active_sessions(
+async def lock_expired_active_sessions(
     session: AsyncSession, player_id: uuid.UUID, game_id: uuid.UUID, now: datetime
-) -> None:
+) -> list[GameSession]:
+    """Lock elapsed active sessions so services can finalize dependent state atomically."""
+
     sessions = await session.scalars(
-        select(GameSession).where(
+        select(GameSession)
+        .where(
             GameSession.player_id == player_id,
             GameSession.game_id == game_id,
             GameSession.status == SessionStatus.ACTIVE,
             GameSession.expires_at <= now,
         )
+        .with_for_update()
     )
-    for game_session in sessions:
-        game_session.status = SessionStatus.EXPIRED
-        game_session.ended_at = now
+    return list(sessions)
 
 
 async def latest_session(

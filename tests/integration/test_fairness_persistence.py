@@ -17,6 +17,7 @@ from app.models import (
     FairnessSeedCustody,
     GameSession,
     Player,
+    SessionStatus,
 )
 from tools.seed import seed_catalogue
 
@@ -213,7 +214,7 @@ async def test_cancelling_a_committed_session_removes_unrevealed_seed_custody() 
 
         async with database.session_factory() as session:
             stored = await session.get(FairnessProof, proof.id)
-            custody = await session.get(FairnessSeedCustody, proof.id)
+            custody = await repositories.get_fairness_seed_custody(session, proof.id)
             events = list(
                 (
                     await session.scalars(
@@ -228,6 +229,123 @@ async def test_cancelling_a_committed_session_removes_unrevealed_seed_custody() 
             assert custody is None
             assert len(events) == 2
             assert events[1].previous_evidence_hash == events[0].evidence_hash
+    finally:
+        await database.dispose()
+
+
+async def test_expired_session_atomically_terminates_committed_fairness() -> None:
+    database = Database(get_settings())
+    try:
+        player_id, game_session = await _daily_spin_session(database, "Expired Fairness")
+        async with database.session_factory() as session:
+            proof = await services.commit_fairness(
+                session, session_id=game_session.id, owner_id=player_id
+            )
+        after_expiry = game_session.expires_at + timedelta(seconds=1)
+
+        async with database.session_factory() as session:
+            expired = await services.retrieve_session(
+                session, game_session.id, player_id, clock=lambda: after_expiry
+            )
+        assert expired.status is SessionStatus.EXPIRED
+
+        async with database.session_factory() as session:
+            stored = await session.get(FairnessProof, proof.id)
+            custody = await repositories.get_fairness_seed_custody(session, proof.id)
+            events = await repositories.list_fairness_proof_events(session, proof.id)
+        assert stored is not None
+        assert stored.status is FairnessProofStatus.EXPIRED
+        assert custody is None
+        assert [event.status for event in events] == [
+            FairnessProofStatus.COMMITTED,
+            FairnessProofStatus.EXPIRED,
+        ]
+        assert events[1].previous_evidence_hash == events[0].evidence_hash
+
+        async with database.session_factory() as session:
+            retried = await services.retrieve_session(
+                session, game_session.id, player_id, clock=lambda: after_expiry
+            )
+            retried_events = await repositories.list_fairness_proof_events(session, proof.id)
+        assert retried.status is SessionStatus.EXPIRED
+        assert len(retried_events) == 2
+    finally:
+        await database.dispose()
+
+
+async def test_expiration_cleanup_allows_replacement_session_creation() -> None:
+    database = Database(get_settings())
+    try:
+        player_id, game_session = await _daily_spin_session(database, "Fairness Replacement")
+        async with database.session_factory() as session:
+            proof = await services.commit_fairness(
+                session, session_id=game_session.id, owner_id=player_id
+            )
+        after_cooldown = game_session.created_at + timedelta(days=1, seconds=1)
+
+        async with database.session_factory() as session:
+            replacement = await services.create_session(
+                session,
+                request_id=uuid4(),
+                player_id=player_id,
+                owner_id=player_id,
+                game_key="daily_spin",
+                clock=lambda: after_cooldown,
+            )
+
+        assert replacement.id != game_session.id
+        assert replacement.status is SessionStatus.ACTIVE
+        async with database.session_factory() as session:
+            stored_proof = await session.get(FairnessProof, proof.id)
+            custody = await repositories.get_fairness_seed_custody(session, proof.id)
+        assert stored_proof is not None
+        assert stored_proof.status is FairnessProofStatus.EXPIRED
+        assert custody is None
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.parametrize("failure_point", ["custody_delete", "event_append"])
+async def test_expiration_rolls_back_if_terminal_side_effect_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    database = Database(get_settings())
+    try:
+        player_id, game_session = await _daily_spin_session(database, "Fairness Rollback")
+        async with database.session_factory() as session:
+            proof = await services.commit_fairness(
+                session, session_id=game_session.id, owner_id=player_id
+            )
+        after_expiry = game_session.expires_at + timedelta(seconds=1)
+
+        async def fail_terminal_side_effect(*args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RuntimeError("injected terminal side-effect failure")
+
+        target = (
+            "delete_fairness_seed_custody"
+            if failure_point == "custody_delete"
+            else "add_fairness_proof_event"
+        )
+        monkeypatch.setattr(repositories, target, fail_terminal_side_effect)
+        with pytest.raises(RuntimeError, match="injected terminal side-effect failure"):
+            async with database.session_factory() as session:
+                await services.retrieve_session(
+                    session, game_session.id, player_id, clock=lambda: after_expiry
+                )
+
+        async with database.session_factory() as session:
+            stored_session = await session.get(GameSession, game_session.id)
+            stored_proof = await session.get(FairnessProof, proof.id)
+            custody = await repositories.get_fairness_seed_custody(session, proof.id)
+            events = await repositories.list_fairness_proof_events(session, proof.id)
+        assert stored_session is not None
+        assert stored_session.status is SessionStatus.ACTIVE
+        assert stored_proof is not None
+        assert stored_proof.status is FairnessProofStatus.COMMITTED
+        assert custody is not None
+        assert len(events) == 1
     finally:
         await database.dispose()
 

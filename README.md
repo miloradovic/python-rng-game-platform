@@ -11,6 +11,8 @@ It has no payments, cash value, wagering, KYC, or claim of regulatory compliance
 - Server-owned game outcomes, scores, rewards, timestamps, and session lifecycle.
 - Immutable game configuration versions and append-only audit/analytics evidence.
 - Provably fair `daily_spin` commitment/reveal using HMAC-SHA256.
+- Atomic session expiration that terminally expires committed fairness proofs,
+  appends their hash-chained terminal event, and removes unrevealed seed custody.
 - PostgreSQL as the durable authority; Redis only as a rebuildable leaderboard projection.
 - Idempotent reward claims, score submissions, and closed-period settlement.
 

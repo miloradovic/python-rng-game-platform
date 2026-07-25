@@ -16,6 +16,7 @@ from app.models import (
     FairnessProofEvent,
     FairnessProofStatus,
     GameConfigVersion,
+    GameSession,
     Outcome,
     Reward,
     SessionStatus,
@@ -154,11 +155,11 @@ async def end_committed_fairness_proof(
     *,
     status: FairnessProofStatus,
     now: datetime,
-) -> None:
+) -> bool:
     """Terminally retire an unrevealed proof and its seed custody evidence."""
 
     if proof.status != FairnessProofStatus.COMMITTED:
-        return
+        return False
     if status not in (FairnessProofStatus.EXPIRED, FairnessProofStatus.CANCELLED):
         raise InvalidTransitionError
     previous_event = await repositories.lock_latest_fairness_proof_event(session, proof.id)
@@ -191,6 +192,34 @@ async def end_committed_fairness_proof(
             created_at=now,
         ),
     )
+    return True
+
+
+async def finalize_expired_session(
+    session: AsyncSession,
+    game_session: GameSession,
+    *,
+    now: datetime,
+    locked_proof: FairnessProof | None = None,
+) -> bool:
+    """Atomically finalize an elapsed session and any committed fairness proof.
+
+    Callers lock the session first. The associated proof and latest event are
+    then locked in a consistent order before any durable state is changed.
+    """
+
+    session_changed = expire_if_due(game_session, now)
+    if not session_changed and game_session.status != SessionStatus.EXPIRED:
+        return False
+    proof = locked_proof
+    if proof is None:
+        proof = await repositories.lock_fairness_proof_by_session(session, game_session.id)
+    proof_changed = False
+    if proof is not None:
+        proof_changed = await end_committed_fairness_proof(
+            session, proof, status=FairnessProofStatus.EXPIRED, now=now
+        )
+    return session_changed or proof_changed
 
 
 async def commit_fairness(
@@ -208,12 +237,7 @@ async def commit_fairness(
     if game_session.player_id != owner_id:
         raise ForbiddenError
     now = clock()
-    if expire_if_due(game_session, now):
-        existing = await repositories.lock_fairness_proof_by_session(session, game_session.id)
-        if existing is not None:
-            await end_committed_fairness_proof(
-                session, existing, status=FairnessProofStatus.EXPIRED, now=now
-            )
+    if await finalize_expired_session(session, game_session, now=now):
         await session.commit()
         raise SessionExpiredError
     if game_session.status != SessionStatus.ACTIVE:
@@ -322,10 +346,7 @@ async def evaluate_fairness(
         await session.commit()
         return outcome, reward, proof
     now = clock()
-    if expire_if_due(game_session, now):
-        await end_committed_fairness_proof(
-            session, proof, status=FairnessProofStatus.EXPIRED, now=now
-        )
+    if await finalize_expired_session(session, game_session, now=now, locked_proof=proof):
         await session.commit()
         raise SessionExpiredError
     if proof.status != FairnessProofStatus.COMMITTED or game_session.status != SessionStatus.ACTIVE:

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
 from app.game_rules import InvalidRulesInputError, PlayIntent, rules_for
-from app.models import FairnessProofStatus, Outcome, SessionStatus
+from app.models import Outcome, SessionStatus
 from app.rng import OutcomeProvider
 from app.services._common import _owned_outcome, utc_now
 from app.services.errors import (
@@ -19,9 +19,8 @@ from app.services.errors import (
     NotFoundError,
     SessionExpiredError,
 )
-from app.services.fairness import end_committed_fairness_proof as _end_committed_fairness_proof
+from app.services.fairness import finalize_expired_session
 from app.services.rewards import reward_value
-from app.services.sessions import expire_if_due
 
 
 async def play_session(
@@ -40,12 +39,7 @@ async def play_session(
     if game_session.player_id != owner_id:
         raise ForbiddenError
     now = clock()
-    if expire_if_due(game_session, now):
-        existing = await repositories.lock_fairness_proof_by_session(session, game_session.id)
-        if existing is not None:
-            await _end_committed_fairness_proof(
-                session, existing, status=FairnessProofStatus.EXPIRED, now=now
-            )
+    if await finalize_expired_session(session, game_session, now=now):
         await session.commit()
         raise SessionExpiredError
     if game_session.status != SessionStatus.ACTIVE:

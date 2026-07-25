@@ -32,6 +32,14 @@ async def _end_committed_fairness_proof(
     await end_committed_fairness_proof(session, proof, status=status, now=now)
 
 
+async def _finalize_expired_session(
+    session: AsyncSession, game_session: GameSession, *, now: datetime
+) -> bool:
+    from app.services.fairness import finalize_expired_session
+
+    return await finalize_expired_session(session, game_session, now=now)
+
+
 def expire_if_due(game_session: GameSession, now: datetime) -> bool:
     """Move an active, elapsed session to its irreversible expired state."""
 
@@ -86,7 +94,11 @@ async def create_session(
     if config is None:
         raise NotFoundError
     now = clock()
-    await repositories.expire_active_sessions(session, player.id, game.id, now)
+    expired_sessions = await repositories.lock_expired_active_sessions(
+        session, player.id, game.id, now
+    )
+    for expired_session in expired_sessions:
+        await _finalize_expired_session(session, expired_session, now=now)
     latest = await repositories.latest_session(session, player.id, game.id)
     if latest is not None and latest.status == SessionStatus.ACTIVE:
         raise ActiveSessionError
@@ -121,9 +133,10 @@ async def retrieve_session(
     clock: Callable[[], datetime] = utc_now,
 ) -> GameSession:
     game_session = await _owned_session(
-        session, session_id=session_id, owner_id=owner_id, for_update=False
+        session, session_id=session_id, owner_id=owner_id, for_update=True
     )
-    expire_if_due(game_session, clock())
+    if await _finalize_expired_session(session, game_session, now=clock()):
+        await session.commit()
     return game_session
 
 
@@ -134,6 +147,9 @@ async def cancel_session(
         session, session_id=session_id, owner_id=owner_id, for_update=True
     )
     now = utc_now()
+    if await _finalize_expired_session(session, game_session, now=now):
+        await session.commit()
+        return game_session
     cancel_active(game_session, now)
     proof = await repositories.lock_fairness_proof_by_session(session, game_session.id)
     if proof is not None:
