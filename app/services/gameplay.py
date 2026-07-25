@@ -19,8 +19,8 @@ from app.services.errors import (
     NotFoundError,
     SessionExpiredError,
 )
-from app.services.fairness import finalize_expired_session
 from app.services.rewards import reward_value
+from app.services.session_termination import finalize_expired_session
 
 
 async def play_session(

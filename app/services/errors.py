@@ -1,8 +1,7 @@
 """Stable domain failures translated only at the transport boundary."""
 
-
-class DomainError(Exception):
-    code = "domain_error"
+from app.domain_errors import DomainError as DomainError
+from app.domain_errors import InvalidTransitionError as InvalidTransitionError
 
 
 class NotFoundError(DomainError):
@@ -27,10 +26,6 @@ class CooldownError(DomainError):
 
 class ActiveSessionError(DomainError):
     code = "active_session_exists"
-
-
-class InvalidTransitionError(DomainError):
-    code = "invalid_transition"
 
 
 class InvalidPlayError(DomainError):

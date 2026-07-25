@@ -1,22 +1,31 @@
 """Commitment/reveal proof lifecycle and verification orchestration."""
 
-import hashlib
-import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
+from app.fairness_events import (
+    commit_event_payload as _commit_event_payload,
+)
+from app.fairness_events import (
+    fairness_event_hash as _fairness_event_hash,
+)
+from app.fairness_events import (
+    fairness_event_hash_v1 as _fairness_event_hash_v1,
+)
+from app.fairness_events import (
+    revealed_event_payload as _revealed_event_payload,
+)
 from app.game_rules import GameKey
 from app.models import (
     FairnessProof,
     FairnessProofEvent,
     FairnessProofStatus,
     GameConfigVersion,
-    GameSession,
     Outcome,
     Reward,
     SessionStatus,
@@ -44,100 +53,12 @@ from app.services.errors import (
     NotFoundError,
     SessionExpiredError,
 )
-from app.services.sessions import expire_if_due
-
-
-def _fairness_event_hash_v1(
-    *,
-    proof_id: uuid.UUID,
-    sequence: int,
-    event_type: str,
-    status: FairnessProofStatus,
-    created_at: datetime,
-    previous_evidence_hash: str | None,
-) -> str:
-    """Produce the frozen v1 append-only event hash from explicit UTC evidence."""
-
-    timestamp = created_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    evidence = (
-        "RNG-GAME-PLATFORM-PVF-EVENT/1\n"
-        f"proof_id={proof_id}\n"
-        f"sequence={sequence}\n"
-        f"event_type={event_type}\n"
-        f"status={status.value}\n"
-        f"created_at={timestamp}\n"
-        f"previous_evidence_hash={previous_evidence_hash or ''}\n"
-    )
-    return hashlib.sha256(evidence.encode("ascii")).hexdigest()
-
-
-def _fairness_event_hash(
-    *,
-    proof_id: uuid.UUID,
-    sequence: int,
-    event_type: str,
-    status: FairnessProofStatus,
-    created_at: datetime,
-    previous_evidence_hash: str | None,
-    payload: dict[str, object],
-) -> str:
-    """Bind the complete v2 lifecycle payload using canonical JSON evidence."""
-
-    evidence = {
-        "created_at": created_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-        "event_type": event_type,
-        "payload": payload,
-        "previous_evidence_hash": previous_evidence_hash,
-        "proof_id": str(proof_id),
-        "sequence": sequence,
-        "status": status.value,
-    }
-    encoded = json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(("RNG-GAME-PLATFORM-PVF-EVENT/2\n" + encoded).encode("ascii")).hexdigest()
-
-
-def _commit_event_payload(proof: FairnessProof) -> dict[str, object]:
-    return {
-        "algorithm": proof.algorithm,
-        "config_version_id": str(proof.config_version_id),
-        "game_key": proof.game_key,
-        "mapping_digest": proof.mapping_digest,
-        "mapping_version": proof.mapping_version,
-        "nonce": proof.nonce,
-        "protocol_version": proof.protocol_version,
-        "server_seed_commitment": proof.server_seed_commitment,
-        "session_id": str(proof.session_id),
-    }
-
-
-def _terminal_event_payload(proof: FairnessProof, now: datetime) -> dict[str, object]:
-    return {
-        **_commit_event_payload(proof),
-        "terminal_at": now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
-    }
-
-
-def _revealed_event_payload(proof: FairnessProof) -> dict[str, object]:
-    return {
-        **_commit_event_payload(proof),
-        "client_seed": proof.client_seed,
-        "derivation_attempt": proof.derivation_attempt,
-        "evaluated_at": _optional_timestamp(proof.evaluated_at),
-        "evaluation_fingerprint": proof.evaluation_fingerprint,
-        "normalized_value": proof.normalized_value,
-        "outcome_id": str(proof.outcome_id) if proof.outcome_id is not None else None,
-        "raw_random_value": proof.raw_random_value,
-        "revealed_at": _optional_timestamp(proof.revealed_at),
-        "reward_key": proof.reward_key,
-        "reward_value": proof.reward_value,
-        "server_seed_revealed": proof.server_seed_revealed,
-    }
-
-
-def _optional_timestamp(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+from app.services.session_termination import (
+    end_committed_fairness_proof as end_committed_fairness_proof,
+)
+from app.services.session_termination import (
+    finalize_expired_session,
+)
 
 
 def _daily_spin_fairness_bands(config: GameConfigVersion) -> tuple[FairnessRewardBand, ...]:
@@ -147,79 +68,6 @@ def _daily_spin_fairness_bands(config: GameConfigVersion) -> tuple[FairnessRewar
     return tuple(
         FairnessRewardBand(reward.key, reward.weight, reward.value) for reward in payload.rewards
     )
-
-
-async def end_committed_fairness_proof(
-    session: AsyncSession,
-    proof: FairnessProof,
-    *,
-    status: FairnessProofStatus,
-    now: datetime,
-) -> bool:
-    """Terminally retire an unrevealed proof and its seed custody evidence."""
-
-    if proof.status != FairnessProofStatus.COMMITTED:
-        return False
-    if status not in (FairnessProofStatus.EXPIRED, FairnessProofStatus.CANCELLED):
-        raise InvalidTransitionError
-    previous_event = await repositories.lock_latest_fairness_proof_event(session, proof.id)
-    if previous_event is None:
-        raise InvalidTransitionError
-    proof.status = status
-    await repositories.delete_fairness_seed_custody(session, proof.id)
-    sequence = previous_event.sequence + 1
-    event_type = status.value
-    payload = _terminal_event_payload(proof, now)
-    await repositories.add_fairness_proof_event(
-        session,
-        FairnessProofEvent(
-            proof_id=proof.id,
-            sequence=sequence,
-            event_type=event_type,
-            evidence_version=2,
-            payload=payload,
-            status=status,
-            previous_evidence_hash=previous_event.evidence_hash,
-            evidence_hash=_fairness_event_hash(
-                proof_id=proof.id,
-                sequence=sequence,
-                event_type=event_type,
-                status=status,
-                created_at=now,
-                previous_evidence_hash=previous_event.evidence_hash,
-                payload=payload,
-            ),
-            created_at=now,
-        ),
-    )
-    return True
-
-
-async def finalize_expired_session(
-    session: AsyncSession,
-    game_session: GameSession,
-    *,
-    now: datetime,
-    locked_proof: FairnessProof | None = None,
-) -> bool:
-    """Atomically finalize an elapsed session and any committed fairness proof.
-
-    Callers lock the session first. The associated proof and latest event are
-    then locked in a consistent order before any durable state is changed.
-    """
-
-    session_changed = expire_if_due(game_session, now)
-    if not session_changed and game_session.status != SessionStatus.EXPIRED:
-        return False
-    proof = locked_proof
-    if proof is None:
-        proof = await repositories.lock_fairness_proof_by_session(session, game_session.id)
-    proof_changed = False
-    if proof is not None:
-        proof_changed = await end_committed_fairness_proof(
-            session, proof, status=FairnessProofStatus.EXPIRED, now=now
-        )
-    return session_changed or proof_changed
 
 
 async def commit_fairness(

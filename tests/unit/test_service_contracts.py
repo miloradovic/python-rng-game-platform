@@ -7,8 +7,18 @@ from uuid import uuid4
 import pytest
 
 from app import repositories, services
-from app.models import Game, GameConfigVersion, GameSession, Outcome, Reward, SessionStatus
+from app.models import (
+    FairnessProof,
+    FairnessProofStatus,
+    Game,
+    GameConfigVersion,
+    GameSession,
+    Outcome,
+    Reward,
+    SessionStatus,
+)
 from app.rng import HmacOutcomeProvider
+from app.services import sessions as session_services
 
 pytestmark = pytest.mark.unit
 
@@ -80,6 +90,44 @@ async def test_retrieve_session_commits_when_it_durably_finalizes_expiry(
     )
 
     assert result.status is SessionStatus.EXPIRED
+    session.commit.assert_awaited_once()
+
+
+async def test_cancel_session_retires_committed_proof_before_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Session cancellation retains fairness cleanup in its transaction orchestration."""
+
+    player_id = uuid4()
+    game_session = GameSession(
+        id=uuid4(),
+        request_id=uuid4(),
+        player_id=player_id,
+        game_id=uuid4(),
+        config_version_id=uuid4(),
+        status=SessionStatus.ACTIVE,
+        expires_at=datetime(2099, 1, 1, tzinfo=UTC),
+        ended_at=None,
+        challenge={},
+    )
+    proof = FairnessProof(id=uuid4(), status=FairnessProofStatus.COMMITTED)
+    session = AsyncMock()
+    retire_proof = AsyncMock(return_value=True)
+    monkeypatch.setattr(repositories, "lock_session", AsyncMock(return_value=game_session))
+    monkeypatch.setattr(
+        repositories, "lock_fairness_proof_by_session", AsyncMock(return_value=proof)
+    )
+    monkeypatch.setattr(session_services, "end_committed_fairness_proof", retire_proof)
+
+    result = await services.cancel_session(session, game_session.id, player_id)
+
+    assert result.status is SessionStatus.CANCELLED
+    retire_proof.assert_awaited_once()
+    call = retire_proof.await_args
+    assert call is not None
+    assert call.args == (session, proof)
+    assert call.kwargs["status"] is FairnessProofStatus.CANCELLED
+    assert isinstance(call.kwargs["now"], datetime)
     session.commit.assert_awaited_once()
 
 

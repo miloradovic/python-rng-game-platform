@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
 from app.game_rules import InvalidRulesInputError, rules_for
-from app.models import FairnessProof, FairnessProofStatus, GameSession, PlayerStatus, SessionStatus
+from app.models import FairnessProofStatus, GameSession, PlayerStatus, SessionStatus
 from app.schemas import game_config_adapter
 from app.services._common import _owned_session, _request_fingerprint, utc_now
 from app.services.errors import (
@@ -19,44 +19,18 @@ from app.services.errors import (
     InactiveGameError,
     InactivePlayerError,
     InvalidPlayError,
-    InvalidTransitionError,
     NotFoundError,
 )
-
-
-async def _end_committed_fairness_proof(
-    session: AsyncSession, proof: FairnessProof, *, status: FairnessProofStatus, now: datetime
-) -> None:
-    from app.services.fairness import end_committed_fairness_proof
-
-    await end_committed_fairness_proof(session, proof, status=status, now=now)
-
-
-async def _finalize_expired_session(
-    session: AsyncSession, game_session: GameSession, *, now: datetime
-) -> bool:
-    from app.services.fairness import finalize_expired_session
-
-    return await finalize_expired_session(session, game_session, now=now)
-
-
-def expire_if_due(game_session: GameSession, now: datetime) -> bool:
-    """Move an active, elapsed session to its irreversible expired state."""
-
-    if game_session.status != SessionStatus.ACTIVE or game_session.expires_at > now:
-        return False
-    game_session.status = SessionStatus.EXPIRED
-    game_session.ended_at = now
-    return True
-
-
-def cancel_active(game_session: GameSession, now: datetime) -> None:
-    """Apply the owner-driven terminal transition."""
-
-    if game_session.status != SessionStatus.ACTIVE:
-        raise InvalidTransitionError
-    game_session.status = SessionStatus.CANCELLED
-    game_session.ended_at = now
+from app.services.session_termination import (
+    end_committed_fairness_proof,
+    finalize_expired_session,
+)
+from app.session_transitions import (
+    cancel_active as cancel_active,
+)
+from app.session_transitions import (
+    expire_if_due as expire_if_due,
+)
 
 
 async def create_session(
@@ -98,7 +72,7 @@ async def create_session(
         session, player.id, game.id, now
     )
     for expired_session in expired_sessions:
-        await _finalize_expired_session(session, expired_session, now=now)
+        await finalize_expired_session(session, expired_session, now=now)
     latest = await repositories.latest_session(session, player.id, game.id)
     if latest is not None and latest.status == SessionStatus.ACTIVE:
         raise ActiveSessionError
@@ -135,7 +109,7 @@ async def retrieve_session(
     game_session = await _owned_session(
         session, session_id=session_id, owner_id=owner_id, for_update=True
     )
-    if await _finalize_expired_session(session, game_session, now=clock()):
+    if await finalize_expired_session(session, game_session, now=clock()):
         await session.commit()
     return game_session
 
@@ -147,13 +121,13 @@ async def cancel_session(
         session, session_id=session_id, owner_id=owner_id, for_update=True
     )
     now = utc_now()
-    if await _finalize_expired_session(session, game_session, now=now):
+    if await finalize_expired_session(session, game_session, now=now):
         await session.commit()
         return game_session
     cancel_active(game_session, now)
     proof = await repositories.lock_fairness_proof_by_session(session, game_session.id)
     if proof is not None:
-        await _end_committed_fairness_proof(
+        await end_committed_fairness_proof(
             session, proof, status=FairnessProofStatus.CANCELLED, now=now
         )
     await session.commit()
