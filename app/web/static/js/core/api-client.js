@@ -6,6 +6,7 @@
     cooldown_active: "This game is still cooling down. Refresh to get the authoritative ready time.",
     forbidden: "This play belongs to a different local demo player.",
     idempotency_conflict: "This saved operation no longer matches the original request.",
+    invalid_transition: "That play has already moved to another server state. Recovering its record is safest.",
     leaderboard_entry_not_found: "You do not have a score in this weekly board yet.",
     not_found: "That player or play could not be found.",
     player_inactive: "This demo player is inactive.",

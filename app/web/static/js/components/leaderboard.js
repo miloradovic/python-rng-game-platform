@@ -14,6 +14,7 @@
       nextCursor: null,
       loading: false,
       error: "",
+      initialized: false,
 
       get hasPlayer() {
         return Boolean(this.player);
@@ -56,8 +57,19 @@
         window.addEventListener("arcade-proof:player", (event) => {
           this.player = event.detail;
           this.cursor = 0;
-          this.load();
+          if (this.initialized) this.load();
         });
+        try {
+          this.player = await window.ArcadeProof.playerStore.validateCurrent();
+        } catch (error) {
+          this.player = window.ArcadeProof.playerStore.current();
+          if (error.code !== "not_found" && error.code !== "forbidden") {
+            this.error = error.message || "The local demo player could not be validated.";
+            this.initialized = true;
+            return;
+          }
+        }
+        this.initialized = true;
         await this.load();
       },
 

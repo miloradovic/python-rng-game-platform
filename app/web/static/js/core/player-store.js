@@ -3,6 +3,7 @@
 (() => {
   const storageKey = "arcade-proof.players.v1";
   let memoryValue = null;
+  let validationPromise = null;
 
   function availableStorage(name) {
     try {
@@ -77,14 +78,22 @@
       emit(null);
     },
     async validateCurrent() {
+      if (validationPromise) return validationPromise;
       const player = this.current();
       if (!player) return null;
+      validationPromise = (async () => {
+        try {
+          const validated = await window.ArcadeProof.api.getPlayer(player.id);
+          return this.save(validated);
+        } catch (error) {
+          if (error.code === "not_found" || error.code === "forbidden") this.remove(player.id);
+          throw error;
+        }
+      })();
       try {
-        const validated = await window.ArcadeProof.api.getPlayer(player.id);
-        return this.save(validated);
-      } catch (error) {
-        if (error.code === "not_found" || error.code === "forbidden") this.remove(player.id);
-        throw error;
+        return await validationPromise;
+      } finally {
+        validationPromise = null;
       }
     },
   };

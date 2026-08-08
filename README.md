@@ -53,8 +53,9 @@ docker compose run --rm app python -m tools.seed
 docker compose ps
 ```
 
-The API is at `http://127.0.0.1:8000`; OpenAPI is at `/docs`. Copy `.env.example`
-to an ignored `.env` only when local values need changing—never commit secrets.
+Open the player lobby at `http://127.0.0.1:8000/`. The JSON API is under `/api/v1`,
+and interactive OpenAPI documentation is at `/docs`. Copy `.env.example` to an
+ignored `.env` only when local values need changing—never commit secrets.
 
 ## Common commands
 
@@ -67,7 +68,8 @@ docker compose run --rm app python -m tools.simulate daily_spin --runs 100000
 ```
 
 Quality checks use the explicit test overlay. Starting this stack waits for the
-separate `db_test` database and supplies its isolated URL to the test suite:
+separate `db_test` database and supplies its isolated URL to both project commands
+and the test suite, so Alembic and quality checks cannot target development data:
 
 ```console
 docker compose -f compose.yaml -f compose.test.yaml up --build -d --wait

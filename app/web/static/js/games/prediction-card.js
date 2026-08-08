@@ -72,7 +72,8 @@
         this.outcome = state.session?.outcome || null;
         this.reward = state.session?.reward || null;
         const saved = window.ArcadeProof.journal.get(this.player.id, gameKey) || {};
-        this.pendingChoice = ["create_session", "play"].includes(saved.pendingAction)
+        this.pendingChoice = (!this.session || this.session.status === "active")
+          && ["create_session", "play"].includes(saved.pendingAction)
           ? saved.choice
           : null;
         const countdownTarget = this.session?.status === "active"
@@ -84,7 +85,14 @@
           this.message = "Choose a card color. The server result is fixed only after submission.";
           return;
         }
-        this.saveJournal({ requestId: this.session.request_id, sessionId: this.session.id, outcome: this.outcome });
+        this.saveJournal({
+          requestId: this.session.request_id,
+          sessionId: this.session.id,
+          outcome: this.outcome,
+          pendingAction: this.session.status === "active"
+            ? saved.pendingAction
+            : (this.reward?.status === "pending" ? "claim" : null),
+        });
         if (this.session.status === "active") {
           this.status = "ready";
           this.message = this.pendingChoice
@@ -121,7 +129,21 @@
         await this.playChoice(choice);
       },
       async resume() {
-        if (this.pendingChoice) await this.playChoice(this.pendingChoice);
+        const choice = this.pendingChoice;
+        if (!choice || this.busy) return;
+        this.busy = true;
+        try {
+          await this.recover();
+        } catch (error) {
+          this.status = "recovering";
+          this.message = error.message;
+          return;
+        } finally {
+          this.busy = false;
+        }
+        if (!this.outcome && (!this.session || this.session.status === "active")) {
+          await this.playChoice(choice);
+        }
       },
       async playChoice(choice) {
         this.busy = true;
@@ -164,7 +186,11 @@
         } catch (error) {
           this.status = error.code === "session_expired" ? "expired" : "recovering";
           this.message = error.message;
-          if (error.uncertain || error.code === "active_session_exists") await this.recover();
+          if (
+            error.uncertain
+            || error.code === "active_session_exists"
+            || error.code === "invalid_transition"
+          ) await this.recover();
         } finally {
           this.busy = false;
         }

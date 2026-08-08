@@ -29,7 +29,16 @@ Session = Annotated[AsyncSession, Depends(get_database_session)]
 OwnerId = Annotated[UUID, Depends(get_player_id)]
 
 
-@router.post("/players", response_model=PlayerResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/players",
+    response_model=PlayerResponse,
+    status_code=status.HTTP_201_CREATED,
+    description=(
+        "Create a local demonstration player. The returned public_label is generated "
+        "by the server for safe leaderboard presentation; display_name remains private "
+        "to owner-facing responses. X-Player-ID is a demo boundary, not authentication."
+    ),
+)
 async def create_player(body: PlayerCreate, session: Session) -> PlayerResponse:
     return PlayerResponse.model_validate(
         await player_services.create_player(session, body.display_name)
@@ -47,7 +56,16 @@ async def get_player(
     )
 
 
-@router.get("/players/{player_id}/game-state", response_model=PlayerGameStateResponse)
+@router.get(
+    "/players/{player_id}/game-state",
+    response_model=PlayerGameStateResponse,
+    description=(
+        "Return the PostgreSQL-authoritative recovery state for one owner and game, "
+        "including server time, next-play eligibility, and the latest recoverable "
+        "session, outcome, reward, fairness, and final-score state. The path player ID "
+        "must match X-Player-ID. Browser timers and operation journals are not authority."
+    ),
+)
 async def get_player_game_state(
     player_id: UUID,
     session: Session,

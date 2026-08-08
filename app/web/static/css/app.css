@@ -1604,7 +1604,7 @@
     width: min(100%, 23rem);
     overflow: visible;
     filter: drop-shadow(0 1.5rem 2rem rgb(0 0 0 / 35%));
-    transition: transform 2.2s cubic-bezier(0.12, 0.72, 0.15, 1);
+    transform-origin: center;
   }
 
   .prize-wheel path {

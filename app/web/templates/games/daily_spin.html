@@ -1,7 +1,7 @@
 <section class="game-cartridge spin-cartridge" x-data="dailySpin" x-init="initialize" x-bind:aria-busy="busy">
   <div class="game-visual spin-stage">
     <div class="wheel-pointer" aria-hidden="true"></div>
-    <svg class="prize-wheel" viewBox="0 0 240 240" role="img" aria-labelledby="wheel-title wheel-description" x-bind:style="wheelStyle">
+    <svg id="daily-spin-wheel" class="prize-wheel" viewBox="0 0 240 240" role="img" aria-labelledby="wheel-title wheel-description">
       <title id="wheel-title">Weighted Daily Spin reward wheel</title>
       <desc id="wheel-description">Segment sizes represent the active server configuration weights.</desc>
       <template x-for="segment in segments" x-bind:key="segment.key">

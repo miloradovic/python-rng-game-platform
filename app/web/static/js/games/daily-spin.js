@@ -33,7 +33,8 @@
       proof: null,
       verification: null,
       segments: [],
-      wheelStyle: "transform: rotate(0deg)",
+      wheelRotation: 0,
+      wheelAnimation: null,
       resultLabel: "",
       countdownLabel: "",
       timer: null,
@@ -58,6 +59,15 @@
       async initialize() {
         window.addEventListener("arcade-proof:player", () => this.load());
         await this.load();
+      },
+      destroy() {
+        this.wheelAnimation?.cancel();
+        window.clearInterval(this.timer);
+      },
+      resetWheel() {
+        this.wheelAnimation?.cancel();
+        this.wheelAnimation = null;
+        this.wheelRotation = 0;
       },
       async load() {
         this.busy = true;
@@ -176,7 +186,7 @@
             this.proof = null;
             this.verification = null;
             this.resultLabel = "";
-            this.wheelStyle = "transform: rotate(0deg)";
+            this.resetWheel();
             const requestId = crypto.randomUUID();
             this.saveJournal({ requestId, pendingAction: "create_session" });
             this.session = await window.ArcadeProof.api.createSession(this.player.id, requestId, gameKey);
@@ -221,8 +231,23 @@
         const reduced = window.ArcadeProof.preferences.reducedMotion();
         const turns = animate && !reduced ? 5 : 0;
         const rotation = turns * 360 + (-90 - segment.center);
-        this.wheelStyle = `transform: rotate(${rotation}deg)`;
-        return animate && !reduced ? 2200 : 0;
+        const duration = animate && !reduced ? 2200 : 0;
+        const wheel = document.getElementById("daily-spin-wheel");
+        if (!wheel) return 0;
+        this.wheelAnimation?.cancel();
+        this.wheelAnimation = wheel.animate(
+          [
+            { transform: `rotate(${this.wheelRotation}deg)` },
+            { transform: `rotate(${rotation}deg)` },
+          ],
+          {
+            duration,
+            easing: "cubic-bezier(0.12, 0.72, 0.15, 1)",
+            fill: "forwards",
+          },
+        );
+        this.wheelRotation = rotation;
+        return duration;
       },
       async animateResult() {
         this.status = "animating";
