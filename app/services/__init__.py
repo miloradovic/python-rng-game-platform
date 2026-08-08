@@ -37,6 +37,7 @@ from app.services.leaderboards import (
     canonical_player_rank,
     leaderboard_period,
     leaderboard_projection_facts,
+    public_leaderboard_labels,
     settle_leaderboard,
     submit_final_score,
 )
@@ -93,6 +94,7 @@ __all__ = [
     "leaderboard_projection_facts",
     "play_session",
     "player_rewards",
+    "public_leaderboard_labels",
     "retrieve_fairness_proof",
     "retrieve_outcome_audit",
     "retrieve_player",

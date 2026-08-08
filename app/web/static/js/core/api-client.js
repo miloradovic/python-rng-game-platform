@@ -6,6 +6,7 @@
     cooldown_active: "This game is still cooling down. Refresh to get the authoritative ready time.",
     forbidden: "This play belongs to a different local demo player.",
     idempotency_conflict: "This saved operation no longer matches the original request.",
+    leaderboard_entry_not_found: "You do not have a score in this weekly board yet.",
     not_found: "That player or play could not be found.",
     player_inactive: "This demo player is inactive.",
     session_expired: "This play expired before completion.",
@@ -141,6 +142,20 @@
         playerId,
         body: { session_id: sessionId },
       });
+    }
+
+    getLeaderboard(playerId, gameKey, periodStart, cursor = 0, limit = 10) {
+      const query = new URLSearchParams({
+        period_start: periodStart,
+        cursor: String(cursor),
+        limit: String(limit),
+      });
+      return this.request(`/leaderboards/${encodeURIComponent(gameKey)}?${query}`, { playerId });
+    }
+
+    getPlayerRank(playerId, gameKey, periodStart) {
+      const query = new URLSearchParams({ game_key: gameKey, period_start: periodStart });
+      return this.request(`/players/${encodeURIComponent(playerId)}/rank?${query}`, { playerId });
     }
 
     cancelSession(playerId, sessionId) {

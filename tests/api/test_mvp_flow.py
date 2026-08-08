@@ -1,5 +1,6 @@
 """Complete HTTP proof for every flagship game path."""
 
+import re
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -38,6 +39,8 @@ async def test_complete_mvp_flow_for_every_game() -> None:
                     "/api/v1/players", json={"display_name": f"MVP {game_key}"}
                 )
                 assert player.status_code == 201
+                assert re.fullmatch(r"Player-[A-F0-9]{12}", player.json()["public_label"])
+                assert player.json()["public_label"] != f"MVP {game_key}"
                 player_id = player.json()["id"]
                 headers = {"X-Player-ID": player_id}
 

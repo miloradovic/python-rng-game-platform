@@ -104,7 +104,9 @@ async def test_game_cartridges_and_leaderboard_render(application: Any) -> None:
     assert 'x-data="skillCheck"' in skill.text
     assert "Local timing does not increase or reduce it" in skill.text
     assert leaderboard.status_code == 200
-    assert "Weekly leaderboard" in leaderboard.text
+    assert 'x-data="leaderboard"' in leaderboard.text
+    assert "One player may appear more than once" in leaderboard.text
+    assert "PostgreSQL is authoritative" in leaderboard.text
     assert missing.status_code == 404
 
 
@@ -116,6 +118,7 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
         "core/operation-journal.js",
         "core/clock.js",
         "components/shared.js",
+        "components/leaderboard.js",
         "games/daily-spin.js",
         "games/prediction-card.js",
         "games/skill-check.js",
@@ -140,12 +143,14 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert all(script.headers["cache-control"] == "public, max-age=3600" for script in scripts)
     assert "X-Player-ID" in scripts[1].text
     assert "clientSeed" in scripts[3].text
-    assert "commitFairness" in scripts[6].text
-    assert 'const gameKey = "daily_spin"' in scripts[6].text
-    assert "authoritative_choice" in scripts[7].text
-    assert '["create_session", "play"]' in scripts[7].text
-    assert "submitFinalScore" in scripts[8].text
-    assert "lockedSubmission" in scripts[8].text
+    assert "commitFairness" in scripts[7].text
+    assert 'const gameKey = "daily_spin"' in scripts[7].text
+    assert "authoritative_choice" in scripts[8].text
+    assert '["create_session", "play"]' in scripts[8].text
+    assert "submitFinalScore" in scripts[9].text
+    assert "lockedSubmission" in scripts[9].text
+    assert "getPlayerRank" in scripts[6].text
+    assert "topEntries" in scripts[6].text
 
 
 async def test_player_csp_does_not_break_openapi_documentation(application: Any) -> None:

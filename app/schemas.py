@@ -51,6 +51,7 @@ class PlayerResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, frozen=True)
     id: UUID
     display_name: str
+    public_label: str
     status: PlayerStatus
     created_at: datetime
 
@@ -342,8 +343,9 @@ class LeaderboardEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
     rank: int
     score_id: UUID
-    player_id: UUID
     session_id: UUID
+    public_label: str
+    is_current_player: bool
     final_score: int
     completed_at: datetime
 

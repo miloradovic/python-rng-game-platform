@@ -243,3 +243,23 @@ async def test_postgresql_rejects_cross_aggregate_domain_bindings() -> None:
             await session.rollback()
     finally:
         await database.dispose()
+
+
+async def test_postgresql_enforces_safe_unique_public_player_labels() -> None:
+    database = Database(get_settings())
+    try:
+        async with database.session_factory() as session:
+            session.add(Player(display_name="First", public_label="Player-ABCDEF123456"))
+            await session.flush()
+            session.add(Player(display_name="Second", public_label="Player-ABCDEF123456"))
+            with pytest.raises(IntegrityError):
+                await session.flush()
+            await session.rollback()
+
+        async with database.session_factory() as session:
+            session.add(Player(display_name="Unsafe", public_label="Unsafe label"))
+            with pytest.raises(IntegrityError):
+                await session.flush()
+            await session.rollback()
+    finally:
+        await database.dispose()

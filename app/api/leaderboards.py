@@ -113,7 +113,9 @@ async def submit_score(
     description=(
         "Return the requested canonical score-entry ordering, which may contain multiple "
         "scores from one player and intentionally differs from unique-player settlement "
-        "ranking. A Redis source is reported only after the generation matches PostgreSQL "
+        "ranking. Entries expose only a generated public label and an owner-safe current "
+        "player marker, never the player UUID or private display name. A Redis source is "
+        "reported only after the generation matches PostgreSQL "
         "revision/count facts and passes keyed integrity validation; every other condition "
         "falls back to PostgreSQL."
     ),
@@ -151,7 +153,8 @@ async def get_leaderboard(
     response_model=PlayerRankResponse,
     description=(
         "Return the authenticated player's canonical rank. Redis is optional and is used "
-        "only for a current, integrity-validated generation."
+        "only for a current, integrity-validated generation. The entry uses the same safe "
+        "public-label contract as the score-entry board."
     ),
 )
 async def get_player_rank(

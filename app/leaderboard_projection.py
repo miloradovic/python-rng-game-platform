@@ -37,12 +37,15 @@ class LeaderboardRank:
     entry: LeaderboardEntry
 
 
-def _database_entry(score: FinalScore, rank: int) -> LeaderboardEntry:
+def _database_entry(
+    score: FinalScore, rank: int, public_label: str, owner_id: UUID
+) -> LeaderboardEntry:
     return LeaderboardEntry(
         rank=rank,
         score_id=score.id,
-        player_id=score.player_id,
         session_id=score.session_id,
+        public_label=public_label,
+        is_current_player=score.player_id == owner_id,
         final_score=score.final_score,
         completed_at=score.completed_at,
     )
@@ -50,13 +53,16 @@ def _database_entry(score: FinalScore, rank: int) -> LeaderboardEntry:
 
 def _projected_entry(
     row: tuple[int, str, str, str, int, int],
+    public_label: str,
+    owner_id: UUID,
 ) -> LeaderboardEntry:
     completed_us, session_id, score_id, player_id, score, rank = row
     return LeaderboardEntry(
         rank=rank,
         score_id=UUID(score_id),
-        player_id=UUID(player_id),
         session_id=UUID(session_id),
+        public_label=public_label,
+        is_current_player=UUID(player_id) == owner_id,
         final_score=score,
         completed_at=datetime.fromtimestamp(completed_us / 1_000_000, UTC),
     )
@@ -118,7 +124,12 @@ class LeaderboardProjectionReader:
         )
         if projected is not None:
             try:
-                selected = [_projected_entry(row) for row in projected]
+                labels = await services.public_leaderboard_labels(
+                    session, {UUID(row[3]) for row in projected}
+                )
+                selected = [
+                    _projected_entry(row, labels[UUID(row[3])], owner_id) for row in projected
+                ]
             except OverflowError, TypeError, ValueError:
                 selected = []
                 projected = None
@@ -131,8 +142,12 @@ class LeaderboardProjectionReader:
                 limit=limit + 1,
                 offset=offset,
             )
+            labels = await services.public_leaderboard_labels(
+                session, {score.player_id for score in scores}
+            )
             selected = [
-                _database_entry(score, offset + index + 1) for index, score in enumerate(scores)
+                _database_entry(score, offset + index + 1, labels[score.player_id], owner_id)
+                for index, score in enumerate(scores)
             ]
             source = "postgresql"
         else:
@@ -171,7 +186,9 @@ class LeaderboardProjectionReader:
         )
         if projected is not None:
             try:
-                entry = _projected_entry(projected)
+                projected_player_id = UUID(projected[3])
+                labels = await services.public_leaderboard_labels(session, {projected_player_id})
+                entry = _projected_entry(projected, labels[projected_player_id], owner_id)
             except OverflowError, TypeError, ValueError:
                 projected = None
         if projected is None:
@@ -182,7 +199,8 @@ class LeaderboardProjectionReader:
                 game_key=game_key,
                 period_start=period_start,
             )
-            entry = _database_entry(score, rank)
+            labels = await services.public_leaderboard_labels(session, {score.player_id})
+            entry = _database_entry(score, rank, labels[score.player_id], owner_id)
             source = "postgresql"
         else:
             source = "redis"

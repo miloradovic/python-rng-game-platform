@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from secrets import token_hex
 from typing import Any
 
 from sqlalchemy import (
@@ -23,6 +24,12 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+
+
+def generate_public_player_label() -> str:
+    """Create a non-editable label that contains no player-provided text."""
+
+    return f"Player-{token_hex(6).upper()}"
 
 
 class PlayerStatus(StrEnum):
@@ -77,8 +84,16 @@ class Timestamped:
 
 class Player(Timestamped, Base):
     __tablename__ = "players"
-    __table_args__ = (CheckConstraint("length(trim(display_name)) >= 2", name="ck_player_name"),)
+    __table_args__ = (
+        CheckConstraint("length(trim(display_name)) >= 2", name="ck_player_name"),
+        CheckConstraint(
+            "public_label ~ '^Player-[A-F0-9]{12}$'", name="ck_player_public_label_format"
+        ),
+    )
     display_name: Mapped[str] = mapped_column(String(50))
+    public_label: Mapped[str] = mapped_column(
+        String(19), unique=True, default=generate_public_player_label
+    )
     status: Mapped[PlayerStatus] = mapped_column(
         Enum(PlayerStatus, name="player_status", values_callable=lambda e: [x.value for x in e]),
         default=PlayerStatus.ACTIVE,

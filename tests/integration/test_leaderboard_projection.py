@@ -280,6 +280,11 @@ async def test_api_projection_hit_skips_canonical_query_and_corruption_falls_bac
             )
             assert fallback.status_code == 200
             assert fallback.json()["source"] == "postgresql"
+            assert all("player_id" not in item for item in fallback.json()["items"])
+            assert all(
+                item["public_label"].startswith("Player-") for item in fallback.json()["items"]
+            )
+            assert any(item["is_current_player"] for item in fallback.json()["items"])
             assert any(
                 item["score_id"] == created.json()["id"] for item in fallback.json()["items"]
             )
@@ -505,6 +510,88 @@ async def test_projection_page_boundaries_match_postgresql() -> None:
             response.json()["items"] for response in canonical
         ]
         assert projected[-1].json()["items"] == []
+    finally:
+        await redis.aclose()
+        await database.dispose()
+
+
+async def test_public_board_keeps_multiple_entries_for_one_safe_label() -> None:
+    """Public recognition remains score-entry based, not unique-player settlement rank."""
+
+    database = Database(get_settings())
+    redis = create_redis_client(get_settings())
+    assert redis is not None
+    player_id = uuid4()
+    period_start, _ = services.leaderboard_period(datetime.now(UTC))
+    try:
+        async with database.session_factory.begin() as session:
+            await seed_catalogue(session)
+            player = Player(id=player_id, display_name="Private Unmoderated Name")
+            session.add(player)
+            await session.flush()
+            game = await repositories.get_game(session, "skill_check")
+            assert game is not None
+            config = await repositories.get_active_config(session, game.id)
+            assert config is not None
+            await _add_settlement_score(
+                session,
+                player_id=player_id,
+                game_id=game.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=period_start + timedelta(hours=1),
+                final_score=900,
+                session_id=uuid4(),
+            )
+            await _add_settlement_score(
+                session,
+                player_id=player_id,
+                game_id=game.id,
+                config_version_id=config.id,
+                period_start=period_start,
+                completed_at=period_start + timedelta(hours=2),
+                final_score=700,
+                session_id=uuid4(),
+            )
+            public_label = player.public_label
+
+        application = create_app(get_settings())
+
+        async def override_session() -> AsyncIterator[AsyncSession]:
+            async with database.session_factory() as session:
+                yield session
+
+        application.dependency_overrides[get_session] = override_session
+        application.state.redis = redis
+        headers = {"X-Player-ID": str(player_id)}
+        params = {"period_start": period_start.isoformat()}
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application), base_url="http://test"
+        ) as client:
+            canonical = await client.get(
+                "/api/v1/leaderboards/skill_check", headers=headers, params=params
+            )
+            async with database.session_factory() as session:
+                await rebuild_leaderboard(
+                    session,
+                    redis,
+                    game_key="skill_check",
+                    period_start=period_start,
+                )
+            projected = await client.get(
+                "/api/v1/leaderboards/skill_check", headers=headers, params=params
+            )
+
+        assert canonical.status_code == 200
+        current_entries = [
+            entry for entry in canonical.json()["items"] if entry["public_label"] == public_label
+        ]
+        assert [entry["final_score"] for entry in current_entries] == [900, 700]
+        assert all(entry["is_current_player"] for entry in current_entries)
+        assert "Private Unmoderated Name" not in canonical.text
+        assert str(player_id) not in canonical.text
+        assert projected.json()["source"] == "redis"
+        assert projected.json()["items"] == canonical.json()["items"]
     finally:
         await redis.aclose()
         await database.dispose()

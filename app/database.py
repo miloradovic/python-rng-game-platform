@@ -16,7 +16,7 @@ from sqlalchemy.orm import DeclarativeBase
 from app.config import Settings
 from app.observability import MetricsRegistry
 
-EXPECTED_ALEMBIC_REVISION = "0013_leaderboard_projection"
+EXPECTED_ALEMBIC_REVISION = "0014_player_public_labels"
 
 
 class Base(AsyncAttrs, DeclarativeBase):

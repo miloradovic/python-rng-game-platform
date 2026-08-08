@@ -176,6 +176,17 @@ async def leaderboard_projection_facts(
     return game, count, revision
 
 
+async def public_leaderboard_labels(
+    session: AsyncSession, player_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Return only generated labels used by player-facing score entries."""
+
+    labels = await repositories.public_labels_by_player_ids(session, player_ids)
+    if labels.keys() != player_ids:
+        raise NotFoundError
+    return labels
+
+
 async def canonical_player_rank(
     session: AsyncSession,
     *,

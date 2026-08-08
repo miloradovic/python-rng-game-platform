@@ -1,6 +1,7 @@
 """Server-rendered player page routes and repository-owned static assets."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session as get_database_session
 from app.models import Game
 from app.services import players as player_services
+from app.services.leaderboards import leaderboard_period
 
 WEB_ROOT = Path(__file__).resolve().parent
 TEMPLATE_ROOT = WEB_ROOT / "templates"
@@ -33,6 +35,7 @@ REQUIRED_WEB_ASSETS = (
     Path("static/js/core/player-store.js"),
     Path("static/js/core/state.js"),
     Path("static/js/components/shared.js"),
+    Path("static/js/components/leaderboard.js"),
     Path("static/js/games/daily-spin.js"),
     Path("static/js/games/prediction-card.js"),
     Path("static/js/games/skill-check.js"),
@@ -121,10 +124,16 @@ async def game_page(game_key: str, request: Request, session: Session) -> HTMLRe
 
 @router.get("/leaderboard", response_class=HTMLResponse, name="leaderboard_page")
 async def leaderboard_page(request: Request) -> HTMLResponse:
-    """Render the shared leaderboard shell before player score data is added."""
+    """Render the current server-defined UTC leaderboard period."""
 
+    period_start, period_end = leaderboard_period(datetime.now(UTC))
     return templates.TemplateResponse(
         request=request,
         name="leaderboard.html",
-        context=_context(request, page="leaderboard"),
+        context=_context(
+            request,
+            page="leaderboard",
+            period_start=period_start,
+            period_end=period_end,
+        ),
     )

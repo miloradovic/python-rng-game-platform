@@ -3,15 +3,103 @@
 {% block title %}Weekly leaderboard · Arcade Proof{% endblock %}
 
 {% block content %}
-  <section class="stage-shell shell" aria-labelledby="leaderboard-title">
-    <p class="eyebrow"><span></span> Skill Check</p>
-    <h1 id="leaderboard-title">Weekly leaderboard</h1>
-    <p class="stage-lede">One player can submit more than one score. Entries use the same canonical server ordering everywhere.</p>
-    <div class="empty-state leaderboard-empty" role="status">
-      <span aria-hidden="true">◇</span>
-      <h2>Scores arrives soon...</h2>
-      <p>The responsive leaderboard shell is ready for canonical PostgreSQL-backed entries.</p>
-      <a class="button button-secondary" href="{{ url_for('lobby') }}">Return to lobby</a>
+  <section
+    class="leaderboard-page shell"
+    aria-labelledby="leaderboard-title"
+    x-data="leaderboard"
+    x-init="init"
+    data-period-start="{{ period_start.isoformat() }}"
+  >
+    <header class="leaderboard-hero">
+      <div>
+        <p class="eyebrow"><span></span> Skill Check · weekly scoreboard</p>
+        <h1 id="leaderboard-title">The week’s sharpest recall.</h1>
+        <p class="stage-lede">Every completed score entry keeps its canonical place. One player may appear more than once.</p>
+      </div>
+      <dl class="period-card" aria-label="Leaderboard period">
+        <div><dt>UTC week</dt><dd>{{ period_start.strftime('%d %b') }}–{{ period_end.strftime('%d %b %Y') }}</dd></div>
+        <div><dt>Ordering</dt><dd>Score, then earliest completion</dd></div>
+      </dl>
+    </header>
+
+    <div class="identity-callout" x-show="!hasPlayer" role="status">
+      <div><span aria-hidden="true">◎</span><div><strong>Choose a local demo player</strong><p>Your player header authorizes the scoreboard and lets us mark your best entry.</p></div></div>
+      <button class="button button-primary" type="button" x-on:click="openIdentity">Choose player</button>
     </div>
+
+    <p class="loading-state" x-show="loading" role="status">Loading the canonical weekly order…</p>
+    <div class="status-panel status-error" x-show="error" role="alert">
+      <p x-text="error"></p>
+      <button class="button button-secondary" type="button" x-on:click="load">Try again</button>
+    </div>
+
+    <div x-show="hasPlayer && !loading && !error">
+      <section class="personal-rank" aria-labelledby="personal-rank-title">
+        <div>
+          <p class="eyebrow">Your best entry</p>
+          <h2 id="personal-rank-title" x-show="personalEntry"><span x-text="personalLabel"></span> <small>You</small></h2>
+          <h2 x-show="!personalEntry">No score this week—yet.</h2>
+          <p x-show="!personalEntry">Complete Skill Check to join this score-entry board.</p>
+        </div>
+        <div class="personal-rank-score" x-show="personalEntry">
+          <span>Rank</span><strong>#<span x-text="personalRank"></span></strong>
+          <span class="score"><span x-text="personalScore"></span> points</span>
+        </div>
+        <a class="button button-secondary" href="{{ url_for('game_page', game_key='skill_check') }}">Play Skill Check</a>
+      </section>
+
+      <section class="scoreboard" aria-labelledby="scoreboard-heading">
+        <div class="section-heading">
+          <div><p class="eyebrow">Canonical score entries</p><h2 id="scoreboard-heading" tabindex="-1">Weekly order</h2></div>
+          <p>Generated labels keep display names private.</p>
+        </div>
+
+        <ol class="podium" x-show="topEntries.length" aria-label="Top three scores">
+          <template x-for="entry in topEntries" x-bind:key="entry.score_id">
+            <li x-bind:class="entry.is_current_player ? 'is-current' : ''">
+              <span class="podium-rank">#<span x-text="entry.rank"></span></span>
+              <span class="podium-medal" aria-hidden="true">◆</span>
+              <strong x-text="entry.public_label"></strong>
+              <small x-show="entry.is_current_player">You</small>
+              <b><span x-text="entry.final_score"></span> <span>points</span></b>
+              <time x-bind:datetime="entry.completed_at" x-text="formatTime(entry.completed_at)"></time>
+            </li>
+          </template>
+        </ol>
+
+        <ol class="rank-list" x-show="listEntries.length" aria-label="Ranked score entries">
+          <template x-for="entry in listEntries" x-bind:key="entry.score_id">
+            <li x-bind:class="entry.is_current_player ? 'is-current' : ''">
+              <span class="rank-number">#<span x-text="entry.rank"></span></span>
+              <span class="rank-player"><strong x-text="entry.public_label"></strong><small x-show="entry.is_current_player">You</small></span>
+              <time x-bind:datetime="entry.completed_at" x-text="formatTime(entry.completed_at)"></time>
+              <b><span x-text="entry.final_score"></span> <span>pts</span></b>
+            </li>
+          </template>
+        </ol>
+
+        <div class="empty-state leaderboard-empty" x-show="items.length === 0" role="status">
+          <span aria-hidden="true">◇</span>
+          <h2>No scores in this UTC week.</h2>
+          <p>Complete Skill Check and submit the server-authoritative result to make the first entry.</p>
+          <a class="button button-secondary" href="{{ url_for('game_page', game_key='skill_check') }}">Play Skill Check</a>
+        </div>
+
+        <nav class="score-pagination" x-show="items.length || hasPrevious" aria-label="Scoreboard pages">
+          <button class="button button-secondary" type="button" x-on:click="previousPage" x-bind:disabled="!hasPrevious">Previous</button>
+          <span>Page <strong x-text="pageNumber"></strong></span>
+          <button class="button button-secondary" type="button" x-on:click="nextPage" x-bind:disabled="!hasNext">Next</button>
+        </nav>
+      </section>
+    </div>
+
+    <aside class="leaderboard-trust" aria-labelledby="leaderboard-trust-title">
+      <div><p class="eyebrow">Trust, without the back office</p><h2 id="leaderboard-trust-title">What this board proves.</h2></div>
+      <ul>
+        <li><span>01</span><strong>Authoritative score</strong><p>Skill Check actions are evaluated by the server; the browser cannot choose the score.</p></li>
+        <li><span>02</span><strong>Immutable rules</strong><p>Each result retains the exact published configuration version used.</p></li>
+        <li><span>03</span><strong>One durable order</strong><p>PostgreSQL is authoritative. A validated cache can only reproduce the same ordering.</p></li>
+      </ul>
+    </aside>
   </section>
 {% endblock %}

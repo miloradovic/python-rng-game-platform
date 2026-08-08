@@ -33,6 +33,9 @@ header, then use the lobby to play each real server flow:
 - Skill Check previews the server-generated unique-digit sequence, accepts keyboard
   or touch input, and submits those actions for the authoritative correct-prefix score.
   It then submits that returned score idempotently and claims the matching reward.
+- The weekly Skill Check scoreboard presents the top three, paginated canonical
+  score entries, and the current player's best rank. Generated `Player-…` labels
+  keep player-entered display names and player UUIDs out of leaderboard entries.
 
 Browser timers and animations are presentation only. Server timestamps enforce
 expiry and cooldown, and browser refresh recovery reads durable state from PostgreSQL.
@@ -90,8 +93,11 @@ when you intentionally want to remove both development and test container data.
 - `POST /api/v1/scores`; read leaderboard and authenticated player rank.
 - `POST /api/v1/leaderboards/skill_check/settle` for an authorized, closed ISO week.
 
-The public leaderboard is score-entry-based, so one player may appear more than
-once. Settlement intentionally ranks unique players instead: each player contributes
+The player-facing leaderboard is score-entry-based, so one generated public label
+may appear more than once. Its UTC period, pagination, and personal best rank use
+the same PostgreSQL-authoritative order whether a validated Redis projection serves
+the read or the request falls back to PostgreSQL. Settlement intentionally ranks
+unique players instead: each player contributes
 only their best eligible score for the closed period. Settlement ranks are contiguous,
 and both best-score selection and ties between players use the canonical order:
 higher score, then earlier completion time, then lower session ID. Every durable
