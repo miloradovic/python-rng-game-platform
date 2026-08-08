@@ -4,12 +4,7 @@
     <svg id="daily-spin-wheel" class="prize-wheel" viewBox="0 0 240 240" role="img" aria-labelledby="wheel-title wheel-description">
       <title id="wheel-title">Weighted Daily Spin reward wheel</title>
       <desc id="wheel-description">Segment sizes represent the active server configuration weights.</desc>
-      <template x-for="segment in segments" x-bind:key="segment.key">
-        <g>
-          <path x-bind:d="segment.path" x-bind:fill="segment.fill"></path>
-          <text x-bind:x="segment.labelX" x-bind:y="segment.labelY" text-anchor="middle" dominant-baseline="middle" x-text="segment.percentage"></text>
-        </g>
-      </template>
+      <g id="daily-spin-segments"></g>
       <circle cx="120" cy="120" r="28"></circle>
       <text class="wheel-center" x="120" y="120" text-anchor="middle" dominant-baseline="middle">SPIN</text>
     </svg>

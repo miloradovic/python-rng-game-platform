@@ -3,6 +3,7 @@
 (() => {
   const gameKey = "daily_spin";
   const palette = ["#67f1cf", "#ffbf5a", "#a987ff", "#ff7f73", "#63b3ff", "#f887d1"];
+  const svgNamespace = "http://www.w3.org/2000/svg";
 
   function clientSeed() {
     const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -19,6 +20,27 @@
     const [endX, endY] = point(end);
     const largeArc = end - start > 180 ? 1 : 0;
     return `M 120 120 L ${startX} ${startY} A 108 108 0 ${largeArc} 1 ${endX} ${endY} Z`;
+  }
+
+  function renderWheelSegments(segments) {
+    const container = document.getElementById("daily-spin-segments");
+    if (!container) return;
+    const groups = segments.map((segment) => {
+      const group = document.createElementNS(svgNamespace, "g");
+      const path = document.createElementNS(svgNamespace, "path");
+      const label = document.createElementNS(svgNamespace, "text");
+      group.setAttribute("data-segment-key", segment.key);
+      path.setAttribute("d", segment.path);
+      path.setAttribute("fill", segment.fill);
+      label.setAttribute("x", segment.labelX);
+      label.setAttribute("y", segment.labelY);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("dominant-baseline", "middle");
+      label.textContent = segment.percentage;
+      group.append(path, label);
+      return group;
+    });
+    container.replaceChildren(...groups);
   }
 
   function dailySpin() {
@@ -103,6 +125,7 @@
           cursor += sweep;
           return segment;
         });
+        renderWheelSegments(this.segments);
       },
       saveJournal(values) {
         if (!this.player) return;

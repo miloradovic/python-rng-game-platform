@@ -18,7 +18,15 @@ OwnerId = Annotated[UUID, Depends(get_player_id)]
 Provider = Annotated[OutcomeProvider, Depends(get_outcome_provider)]
 
 
-@router.post("/sessions/{session_id}/play", response_model=OutcomeResponse)
+@router.post(
+    "/sessions/{session_id}/play",
+    response_model=OutcomeResponse,
+    description=(
+        "Resolve a direct-play session with server-authoritative rules. Repeating a completed "
+        "Prediction Card request with the same choice returns its recorded outcome; changing "
+        "the choice returns an idempotency conflict."
+    ),
+)
 async def play_session(
     session_id: UUID,
     body: PlayRequest,

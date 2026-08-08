@@ -14,6 +14,7 @@ from app.services._common import _owned_outcome, utc_now
 from app.services.errors import (
     DailySpinFairnessRequiredError,
     ForbiddenError,
+    IdempotencyConflictError,
     InvalidPlayError,
     InvalidTransitionError,
     NotFoundError,
@@ -42,7 +43,25 @@ async def play_session(
     if await finalize_expired_session(session, game_session, now=now):
         await session.commit()
         raise SessionExpiredError
+    intent = PlayIntent(choice=choice, actions=actions)
     if game_session.status != SessionStatus.ACTIVE:
+        if game_session.status == SessionStatus.COMPLETED:
+            game = await repositories.get_game_by_id(session, game_session.game_id)
+            outcome = await repositories.get_outcome_by_session(session, game_session.id)
+            if game is not None and outcome is not None:
+                try:
+                    registered_game = rules_for(game.key)
+                except InvalidRulesInputError as error:
+                    raise InvalidPlayError from error
+                if registered_game.mode == "direct":
+                    retry_matches = registered_game.direct_play.retry_matches(
+                        outcome=outcome, intent=intent
+                    )
+                    if retry_matches is True:
+                        await session.commit()
+                        return outcome
+                    if retry_matches is False:
+                        raise IdempotencyConflictError
         raise InvalidTransitionError
     game = await repositories.get_game_by_id(session, game_session.game_id)
     config = await repositories.get_config_by_id(session, game_session.config_version_id)
@@ -58,7 +77,7 @@ async def play_session(
         result = registered_game.direct_play.evaluate(
             game_session=game_session,
             config=config,
-            intent=PlayIntent(choice=choice, actions=actions),
+            intent=intent,
             provider=provider,
             now=now,
         )

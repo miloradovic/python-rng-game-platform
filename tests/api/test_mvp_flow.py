@@ -82,6 +82,20 @@ async def test_complete_mvp_flow_for_every_game() -> None:
                     )
                     assert played.status_code == 200
                     played_json = played.json()
+                    retried_play = await client.post(
+                        f"/api/v1/sessions/{created.json()['id']}/play",
+                        headers=headers,
+                        json=play_body,
+                    )
+                    conflicting_play = await client.post(
+                        f"/api/v1/sessions/{created.json()['id']}/play",
+                        headers=headers,
+                        json={"choice": "black"},
+                    )
+                    assert retried_play.status_code == 200
+                    assert retried_play.json() == played_json
+                    assert conflicting_play.status_code == 409
+                    assert conflicting_play.json()["error"]["code"] == "idempotency_conflict"
                 else:
                     play_body = {"actions": created.json()["challenge"]["sequence"]}
                     played = await client.post(

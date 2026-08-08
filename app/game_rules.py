@@ -48,6 +48,10 @@ class GameDefinition(Protocol):
 class DirectPlayEvaluation(Protocol):
     """Deterministic evaluation supported by direct-play games only."""
 
+    def retry_matches(self, *, outcome: Outcome, intent: PlayIntent) -> bool | None:
+        """Compare a durable outcome with replayed intent, or decline retry support."""
+        ...
+
     def evaluate(
         self,
         *,
@@ -125,6 +129,9 @@ class PredictionCardRules:
     def create_challenge(self) -> dict[str, object]:
         return {}
 
+    def retry_matches(self, *, outcome: Outcome, intent: PlayIntent) -> bool | None:
+        return intent.actions is None and outcome.result.get("player_choice") == intent.choice
+
     def evaluate(
         self,
         *,
@@ -171,6 +178,10 @@ class SkillCheckRules:
 
     def create_challenge(self) -> dict[str, object]:
         return {"sequence": secure_challenge()}
+
+    def retry_matches(self, *, outcome: Outcome, intent: PlayIntent) -> bool | None:
+        del outcome, intent
+        return None
 
     def evaluate(
         self,

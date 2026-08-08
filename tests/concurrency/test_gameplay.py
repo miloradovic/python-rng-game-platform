@@ -20,9 +20,55 @@ from app.models import (
     Player,
     Reward,
 )
+from app.rng import HmacOutcomeProvider
 from tools.seed import seed_catalogue
 
 pytestmark = pytest.mark.concurrency
+
+
+async def test_concurrent_prediction_retry_returns_one_durable_outcome() -> None:
+    database = Database(get_settings())
+    player_id = uuid4()
+    try:
+        async with database.session_factory.begin() as session:
+            await seed_catalogue(session)
+            session.add(Player(id=player_id, display_name="Concurrent Prediction"))
+        async with database.session_factory() as session:
+            game_session = await services.create_session(
+                session,
+                request_id=uuid4(),
+                player_id=player_id,
+                owner_id=player_id,
+                game_key="prediction_card",
+            )
+
+        async def play() -> Outcome:
+            async with database.session_factory() as session:
+                return await services.play_session(
+                    session,
+                    session_id=game_session.id,
+                    owner_id=player_id,
+                    choice="red",
+                    actions=None,
+                    provider=HmacOutcomeProvider("concurrent-prediction-secret-key"),
+                )
+
+        outcomes = await asyncio.gather(play(), play())
+        assert outcomes[0].id == outcomes[1].id
+
+        async with database.session_factory() as session:
+            outcome_count = await session.scalar(
+                select(func.count())
+                .select_from(Outcome)
+                .where(Outcome.session_id == game_session.id)
+            )
+            reward_count = await session.scalar(
+                select(func.count()).select_from(Reward).where(Reward.player_id == player_id)
+            )
+        assert outcome_count == 1
+        assert reward_count == 1
+    finally:
+        await database.dispose()
 
 
 async def test_concurrent_play_has_one_durable_winner() -> None:

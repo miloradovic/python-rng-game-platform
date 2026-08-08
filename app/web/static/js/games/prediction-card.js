@@ -120,6 +120,7 @@
         this.timer = window.setInterval(render, 1000);
       },
       async choose(event) {
+        if (this.busy) return;
         if (!this.player) {
           document.getElementById("identity-dialog")?.showModal();
           return;
@@ -146,6 +147,7 @@
         }
       },
       async playChoice(choice) {
+        if (this.busy) return;
         this.busy = true;
         this.status = "submitting";
         try {

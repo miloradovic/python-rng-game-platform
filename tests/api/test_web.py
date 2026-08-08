@@ -100,6 +100,13 @@ async def test_game_cartridges_and_leaderboard_render(application: Any) -> None:
     assert game.status_code == 200
     assert 'x-data="dailySpin"' in game.text
     assert "Weighted Daily Spin reward wheel" in game.text
+    assert 'id="daily-spin-segments"' in game.text
+    assert '<template x-for="segment in segments"' in game.text
+    assert '<svg id="daily-spin-wheel"' in game.text
+    svg_markup = game.text.split('<svg id="daily-spin-wheel"', maxsplit=1)[1].split(
+        "</svg>", maxsplit=1
+    )[0]
+    assert "<template" not in svg_markup
     assert "x-bind:style" not in game.text
     assert "style=" not in game.text
     assert 'x-data="predictionCard"' in prediction.text
@@ -150,12 +157,16 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "commitFairness" in scripts[7].text
     assert 'const gameKey = "daily_spin"' in scripts[7].text
     assert "wheel.animate(" in scripts[7].text
+    assert 'document.createElementNS(svgNamespace, "g")' in scripts[7].text
+    assert "container.replaceChildren(...groups)" in scripts[7].text
+    assert "renderWheelSegments(this.segments)" in scripts[7].text
     assert "wheelStyle" not in scripts[7].text
     assert "authoritative_choice" in scripts[8].text
     assert '["create_session", "play"]' in scripts[8].text
     assert "await this.recover();" in scripts[8].text
     assert 'error.code === "invalid_transition"' in scripts[8].text
     assert 'this.session.status === "active"' in scripts[8].text
+    assert scripts[8].text.count("if (this.busy) return;") >= 2
     assert "submitFinalScore" in scripts[9].text
     assert "lockedSubmission" in scripts[9].text
     assert "getPlayerRank" in scripts[6].text

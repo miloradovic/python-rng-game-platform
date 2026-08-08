@@ -29,7 +29,9 @@ header, then use the lobby to play each real server flow:
   exact recovery, animates only after the authoritative result, retrieves the full
   reveal evidence, asks the server to verify it, and claims the recorded reward.
 - Prediction Card submits only a labelled red or black choice and reveals the card
-  returned by the server. Incorrect predictions explicitly show a zero-point reward.
+  returned by the server. Retrying the same session and choice returns that recorded
+  outcome, while changing the choice is rejected. Incorrect predictions explicitly
+  show a zero-point reward.
 - Skill Check previews the server-generated unique-digit sequence, accepts keyboard
   or touch input, and submits those actions for the authoritative correct-prefix score.
   It then submits that returned score idempotently and claims the matching reward.
