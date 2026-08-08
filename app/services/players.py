@@ -6,13 +6,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
 from app.models import Game, GameConfigVersion, Player
-from app.services.errors import ForbiddenError, InactiveGameError, NotFoundError
+from app.services.errors import (
+    ForbiddenError,
+    IdempotencyConflictError,
+    InactiveGameError,
+    NotFoundError,
+)
 
 
 async def create_player(session: AsyncSession, display_name: str) -> Player:
     player = await repositories.add_player(session, display_name)
     await session.commit()
     return player
+
+
+async def provision_player(
+    session: AsyncSession,
+    *,
+    player_id: uuid.UUID,
+    display_name: str,
+    public_label: str,
+) -> tuple[Player, bool]:
+    """Idempotently provision an explicitly identified player for trusted tooling."""
+
+    existing = await repositories.get_player(session, player_id)
+    player = await repositories.provision_player(
+        session,
+        player_id=player_id,
+        display_name=display_name,
+        public_label=public_label,
+    )
+    if player.display_name != display_name or player.public_label != public_label:
+        await session.rollback()
+        raise IdempotencyConflictError
+    await session.commit()
+    return player, existing is None
 
 
 async def retrieve_player(

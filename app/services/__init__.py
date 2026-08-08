@@ -41,7 +41,13 @@ from app.services.leaderboards import (
     settle_leaderboard,
     submit_final_score,
 )
-from app.services.players import active_config, catalogue, create_player, retrieve_player
+from app.services.players import (
+    active_config,
+    catalogue,
+    create_player,
+    provision_player,
+    retrieve_player,
+)
 from app.services.rewards import claim_reward, claim_session_reward, player_rewards, reward_value
 from app.services.sessions import (
     PlayerGameState,
@@ -94,6 +100,7 @@ __all__ = [
     "leaderboard_projection_facts",
     "play_session",
     "player_rewards",
+    "provision_player",
     "public_leaderboard_labels",
     "retrieve_fairness_proof",
     "retrieve_outcome_audit",

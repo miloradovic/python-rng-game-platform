@@ -52,7 +52,13 @@ from app.persistence.leaderboards import (
     list_settlement_scores,
     player_canonical_rank,
 )
-from app.persistence.players import add_player, get_player, lock_player, public_labels_by_player_ids
+from app.persistence.players import (
+    add_player,
+    get_player,
+    lock_player,
+    provision_player,
+    public_labels_by_player_ids,
+)
 from app.persistence.sessions import (
     add_session,
     get_session,
@@ -124,6 +130,7 @@ __all__ = [
     "lock_session",
     "lock_session_request_id",
     "player_canonical_rank",
+    "provision_player",
     "public_labels_by_player_ids",
     "settlement_recipients",
     "settlement_reward",

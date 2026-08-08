@@ -3,6 +3,7 @@
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -15,6 +16,26 @@ async def add_player(session: AsyncSession, display_name: str) -> Player:
     session.add(player)
     await session.flush()
     await session.refresh(player)
+    return player
+
+
+async def provision_player(
+    session: AsyncSession,
+    *,
+    player_id: uuid.UUID,
+    display_name: str,
+    public_label: str,
+) -> Player:
+    """Insert one trusted, stable identity or return the row already using its ID."""
+
+    await session.execute(
+        insert(Player)
+        .values(id=player_id, display_name=display_name, public_label=public_label)
+        .on_conflict_do_nothing(index_elements=[Player.id])
+    )
+    player = await session.get(Player, player_id)
+    if player is None:  # pragma: no cover - the insert/select contract makes this unreachable
+        raise RuntimeError("player provisioning did not produce a row")
     return player
 
 
