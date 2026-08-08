@@ -1052,6 +1052,384 @@
 }
 
 @layer pages {
+  .cartridge-heading {
+    max-width: 48rem;
+  }
+
+  .cartridge-heading h1 {
+    margin-top: var(--space-2);
+    font-size: clamp(2.6rem, 8vw, 5.5rem);
+    line-height: 0.95;
+  }
+
+  .cartridge-heading > p:last-child {
+    max-width: 40rem;
+    margin-top: var(--space-3);
+    color: var(--muted);
+    font-size: 1.05rem;
+  }
+
+  .game-cartridge {
+    display: grid;
+    grid-template-columns: minmax(18rem, 1.05fr) minmax(18rem, 0.95fr);
+    gap: clamp(1.5rem, 5vw, 4rem);
+    align-items: center;
+    margin-top: var(--space-5);
+    padding: clamp(1rem, 4vw, 2.5rem);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(145deg, rgb(255 255 255 / 5%), rgb(255 255 255 / 1%));
+    box-shadow: var(--shadow);
+  }
+
+  .game-visual {
+    position: relative;
+    display: grid;
+    min-height: 27rem;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 9%);
+    border-radius: var(--radius-md);
+    background: radial-gradient(circle at 50% 35%, rgb(103 241 207 / 13%), transparent 55%), var(--ink-900);
+  }
+
+  .game-controls {
+    display: grid;
+    gap: var(--space-3);
+    align-content: center;
+  }
+
+  .game-status {
+    min-height: 3.3rem;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .game-action {
+    width: 100%;
+  }
+
+  .result-panel {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding: var(--space-4);
+    border: 1px solid rgb(103 241 207 / 30%);
+    border-radius: var(--radius-md);
+    background: rgb(103 241 207 / 5%);
+  }
+
+  .result-panel h2 {
+    font-size: clamp(1.5rem, 4vw, 2.4rem);
+  }
+
+  .result-kicker,
+  .sequence-label {
+    color: var(--teal);
+    font-size: 0.75rem;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .verified-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--teal);
+    font-weight: 800;
+  }
+
+  .verified-badge span {
+    display: grid;
+    width: 1.6rem;
+    height: 1.6rem;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--teal);
+    color: var(--ink-900);
+  }
+
+  .spin-stage {
+    padding: 2.7rem 1rem 1rem;
+  }
+
+  .prize-wheel {
+    width: min(100%, 23rem);
+    overflow: visible;
+    filter: drop-shadow(0 1.5rem 2rem rgb(0 0 0 / 35%));
+    transition: transform 2.2s cubic-bezier(0.12, 0.72, 0.15, 1);
+  }
+
+  .prize-wheel path {
+    stroke: var(--ink-900);
+    stroke-width: 2;
+  }
+
+  .prize-wheel > circle {
+    fill: var(--ink-850);
+    stroke: var(--white);
+    stroke-width: 2;
+  }
+
+  .prize-wheel text {
+    fill: var(--ink-900);
+    font-size: 0.72rem;
+    font-weight: 900;
+  }
+
+  .prize-wheel .wheel-center {
+    fill: var(--white);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+  }
+
+  .wheel-pointer {
+    position: absolute;
+    z-index: 2;
+    top: 1.25rem;
+    width: 0;
+    height: 0;
+    border-right: 0.8rem solid transparent;
+    border-left: 0.8rem solid transparent;
+    border-top: 1.8rem solid var(--white);
+    filter: drop-shadow(0 0.3rem 0.3rem rgb(0 0 0 / 50%));
+  }
+
+  .wheel-legend {
+    display: flex;
+    gap: 0.5rem 1rem;
+    justify-content: center;
+    margin-top: 1rem;
+    color: var(--muted);
+    flex-wrap: wrap;
+    font-size: 0.76rem;
+  }
+
+  .wheel-legend li {
+    display: flex;
+    gap: 0.25rem;
+  }
+
+  .wheel-legend span {
+    color: var(--teal);
+    font-weight: 900;
+  }
+
+  .proof-details {
+    margin-top: var(--space-2);
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-2);
+  }
+
+  .proof-details summary {
+    min-height: 2.75rem;
+    padding-top: 0.7rem;
+    color: var(--teal);
+    cursor: pointer;
+    font-weight: 800;
+  }
+
+  .proof-details p {
+    margin-block: var(--space-2);
+    color: var(--muted);
+  }
+
+  .proof-details pre {
+    max-height: 18rem;
+    padding: var(--space-3);
+    overflow: auto;
+    border-radius: var(--radius-sm);
+    background: rgb(0 0 0 / 35%);
+    color: #dbe8ef;
+    font-size: 0.7rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .card-stage {
+    perspective: 70rem;
+  }
+
+  .prediction-card {
+    position: relative;
+    display: grid;
+    width: min(65%, 15rem);
+    aspect-ratio: 2.5 / 3.5;
+    place-items: center;
+    border: 0.5rem solid #edf5f8;
+    border-radius: 1.2rem;
+    background: repeating-linear-gradient(45deg, #14283a 0 0.6rem, #1b3b50 0.6rem 1.2rem);
+    box-shadow: 0 2rem 3rem rgb(0 0 0 / 40%);
+    color: #edf5f8;
+    transform: rotateY(0deg);
+    transition: transform 0.7s cubic-bezier(0.2, 0.75, 0.2, 1), background 0s 0.35s;
+  }
+
+  .prediction-card.is-revealed {
+    background: #f7fbfc;
+    transform: rotateY(180deg);
+  }
+
+  .prediction-card > strong,
+  .prediction-card > span {
+    transition: transform 0s 0.35s;
+  }
+
+  .prediction-card.is-revealed > strong,
+  .prediction-card.is-revealed > span {
+    transform: rotateY(180deg);
+  }
+
+  .prediction-card > strong {
+    font-size: 6rem;
+  }
+
+  .prediction-card.red {
+    color: #be2d3c;
+  }
+
+  .prediction-card.black {
+    color: #17212b;
+  }
+
+  .card-corner {
+    position: absolute;
+    top: 0.8rem;
+    left: 0.8rem;
+    font-weight: 900;
+  }
+
+  .card-corner-bottom {
+    inset: auto 0.8rem 0.8rem auto;
+  }
+
+  .prediction-choices {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+    padding: 0;
+    border: 0;
+  }
+
+  .prediction-choices legend {
+    margin-bottom: var(--space-2);
+    font-weight: 900;
+  }
+
+  .prediction-choice {
+    display: grid;
+    min-height: 7rem;
+    gap: 0.35rem;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: rgb(255 255 255 / 4%);
+    color: var(--white);
+    cursor: pointer;
+  }
+
+  .prediction-choice span {
+    font-size: 2.4rem;
+  }
+
+  .prediction-choice.red span {
+    color: #ff6f78;
+  }
+
+  .prediction-choice.black span {
+    color: #bfcbd3;
+  }
+
+  .prediction-choice:hover {
+    border-color: var(--teal);
+    transform: translateY(-0.15rem);
+  }
+
+  .sequence-stage {
+    align-content: center;
+    gap: var(--space-3);
+  }
+
+  .sequence-preview {
+    display: flex;
+    gap: clamp(0.35rem, 2vw, 0.8rem);
+    padding: 0;
+    list-style: none;
+  }
+
+  .sequence-preview li {
+    display: grid;
+    width: clamp(2.7rem, 8vw, 4rem);
+    aspect-ratio: 1;
+    place-items: center;
+    border: 1px solid rgb(103 241 207 / 45%);
+    border-radius: var(--radius-sm);
+    background: rgb(103 241 207 / 8%);
+    font-size: clamp(1.5rem, 5vw, 2.3rem);
+    font-weight: 900;
+  }
+
+  .sequence-hidden {
+    color: var(--teal);
+    font-size: clamp(3rem, 12vw, 6rem);
+    letter-spacing: 0.16em;
+  }
+
+  .skill-score {
+    display: grid;
+    gap: 0.4rem;
+    text-align: center;
+  }
+
+  .skill-score strong {
+    color: var(--teal);
+    font-size: clamp(2.6rem, 8vw, 5rem);
+  }
+
+  .skill-score span {
+    color: var(--muted);
+  }
+
+  .skill-input {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .digit-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.5rem;
+  }
+
+  .digit-key {
+    min-height: 3.4rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgb(255 255 255 / 5%);
+    color: var(--white);
+    cursor: pointer;
+    font-size: 1.2rem;
+    font-weight: 900;
+  }
+
+  .digit-key:hover:not(:disabled) {
+    border-color: var(--teal);
+    background: rgb(103 241 207 / 10%);
+  }
+
+  .digit-key.is-used {
+    color: var(--muted);
+    opacity: 0.35;
+  }
+
+  .skill-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
   .recovery-panel {
     display: grid;
     max-width: 52rem;
@@ -1139,6 +1517,28 @@
 
     .recovery-details dl {
       grid-template-columns: 1fr;
+    }
+
+    .game-cartridge {
+      grid-template-columns: 1fr;
+      padding: 0.75rem;
+    }
+
+    .game-visual {
+      min-height: 20rem;
+    }
+
+    .prediction-choices {
+      grid-template-columns: 1fr;
+    }
+
+    .prediction-choice {
+      min-height: 4.5rem;
+    }
+
+    .skill-actions {
+      align-items: stretch;
+      flex-direction: column;
     }
   }
 }

@@ -19,6 +19,27 @@ It has no payments, cash value, wagering, KYC, or claim of regulatory compliance
 The seeded games are `daily_spin`, `prediction_card`, and `skill_check`. Only the
 server-derived `skill_check` result is eligible for the leaderboard.
 
+## Player frontend
+
+The repository-owned Jinja, Alpine.js, JavaScript, CSS, and SVG frontend has no
+Node build step or CDN dependency. Create or select a local demo identity from the
+header, then use the lobby to play each real server flow:
+
+- Daily Spin publishes a commitment, retains one browser-generated client seed for
+  exact recovery, animates only after the authoritative result, retrieves the full
+  reveal evidence, asks the server to verify it, and claims the recorded reward.
+- Prediction Card submits only a labelled red or black choice and reveals the card
+  returned by the server. Incorrect predictions explicitly show a zero-point reward.
+- Skill Check previews the server-generated unique-digit sequence, accepts keyboard
+  or touch input, and submits those actions for the authoritative correct-prefix score.
+  It then submits that returned score idempotently and claims the matching reward.
+
+Browser timers and animations are presentation only. Server timestamps enforce
+expiry and cooldown, and browser refresh recovery reads durable state from PostgreSQL.
+The browser operation journal retains request, session, commitment, seed, outcome,
+and pending-action identifiers; uncertain mutations are never automatically replaced
+with a new intent. Local player IDs remain a demonstration boundary, not authentication.
+
 ## Quick start
 
 Only Docker and Docker Compose are required on the host.

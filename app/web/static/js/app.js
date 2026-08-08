@@ -29,4 +29,7 @@ document.addEventListener("alpine:init", () => {
   window.Alpine.data("networkStatus", window.ArcadeProof.components.networkStatus);
   window.Alpine.data("operationRecovery", window.ArcadeProof.components.operationRecovery);
   window.Alpine.data("toastRegion", window.ArcadeProof.components.toastRegion);
+  window.Alpine.data("dailySpin", window.ArcadeProof.games.dailySpin);
+  window.Alpine.data("predictionCard", window.ArcadeProof.games.predictionCard);
+  window.Alpine.data("skillCheck", window.ArcadeProof.games.skillCheck);
 });

@@ -83,6 +83,66 @@
       return this.request(`/players/${encodeURIComponent(playerId)}/game-state?${query}`, { playerId });
     }
 
+    getGameConfig(gameKey) {
+      return this.request(`/games/${encodeURIComponent(gameKey)}/config`);
+    }
+
+    createSession(playerId, requestId, gameKey) {
+      return this.request("/sessions", {
+        method: "POST",
+        playerId,
+        body: { request_id: requestId, player_id: playerId, game_key: gameKey },
+      });
+    }
+
+    playSession(playerId, sessionId, intent) {
+      return this.request(`/sessions/${encodeURIComponent(sessionId)}/play`, {
+        method: "POST",
+        playerId,
+        body: intent,
+      });
+    }
+
+    claimSession(playerId, sessionId) {
+      return this.request(`/sessions/${encodeURIComponent(sessionId)}/claim`, {
+        method: "POST",
+        playerId,
+        body: {},
+      });
+    }
+
+    commitFairness(playerId, sessionId) {
+      return this.request("/fairness/commit", {
+        method: "POST",
+        playerId,
+        body: { session_id: sessionId },
+      });
+    }
+
+    evaluateFairness(playerId, proofId, clientSeed) {
+      return this.request("/fairness/evaluate", {
+        method: "POST",
+        playerId,
+        body: { proof_id: proofId, client_seed: clientSeed },
+      });
+    }
+
+    getFairnessProof(playerId, outcomeId) {
+      return this.request(`/fairness/outcomes/${encodeURIComponent(outcomeId)}/proof`, { playerId });
+    }
+
+    verifyFairness(playerId, outcomeId) {
+      return this.request(`/fairness/outcomes/${encodeURIComponent(outcomeId)}/verify`, { playerId });
+    }
+
+    submitScore(playerId, sessionId) {
+      return this.request("/scores", {
+        method: "POST",
+        playerId,
+        body: { session_id: sessionId },
+      });
+    }
+
     cancelSession(playerId, sessionId) {
       return this.request(`/sessions/${encodeURIComponent(sessionId)}`, {
         method: "DELETE",

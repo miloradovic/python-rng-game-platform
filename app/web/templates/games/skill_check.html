@@ -1,0 +1,41 @@
+<section class="game-cartridge skill-cartridge" x-data="skillCheck" x-init="initialize" x-bind:aria-busy="busy">
+  <div class="game-visual sequence-stage">
+    <p class="sequence-label" x-show="isPreview">Memorize</p>
+    <ol class="sequence-preview" x-show="isPreview" aria-label="Server-generated sequence">
+      <template x-for="digit in sequence" x-bind:key="digit">
+        <li x-text="digit"></li>
+      </template>
+    </ol>
+    <div class="sequence-hidden" x-show="isInput" aria-hidden="true">•••••</div>
+    <div class="skill-score" x-show="isResult">
+      <strong x-text="scoreLabel"></strong>
+      <span x-text="accuracyLabel"></span>
+    </div>
+  </div>
+  <div class="game-controls">
+    <p class="game-status" role="status" aria-live="polite" x-text="message"></p>
+    <p class="countdown" x-show="countdownLabel"><span x-text="countdownPrefix"></span> <strong x-text="countdownLabel"></strong></p>
+    <button class="button button-primary game-action" type="button" x-show="canStart" x-on:click="start" x-bind:disabled="busy" x-text="actionLabel"></button>
+    <div class="skill-input" x-show="isInput">
+      <p>Your sequence: <strong x-text="enteredLabel"></strong></p>
+      <div class="digit-grid" role="group" aria-label="Enter unique digits">
+        <template x-for="item in digits" x-bind:key="item.digit">
+          <button type="button" x-bind:class="item.className" x-bind:data-digit="item.digit" x-bind:aria-label="item.label" x-bind:disabled="item.disabled" x-on:click="enterDigit" x-text="item.digit"></button>
+        </template>
+      </div>
+      <div class="skill-actions">
+        <button class="text-button" type="button" x-on:click="undo" x-bind:disabled="undoDisabled">Undo last</button>
+        <button class="button button-primary" type="button" x-on:click="submit" x-bind:disabled="busy" x-show="canSubmit">Submit to server</button>
+      </div>
+    </div>
+    <section class="result-panel" x-show="isResult" aria-labelledby="skill-result-title">
+      <p class="result-kicker">Authoritative score</p>
+      <h2 id="skill-result-title" x-text="scoreLabel"></h2>
+      <p x-text="accuracyLabel"></p>
+      <p>The score uses the correct prefix only. Local timing does not increase or reduce it.</p>
+      <p x-text="rewardLabel"></p>
+      <p class="verified-badge" x-show="finalScore"><span aria-hidden="true">✓</span> Submitted idempotently to the weekly board</p>
+      <button class="button button-primary" type="button" x-show="canClaim" x-on:click="claim" x-bind:disabled="busy">Claim score reward</button>
+    </section>
+  </div>
+</section>

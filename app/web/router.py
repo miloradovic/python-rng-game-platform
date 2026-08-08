@@ -23,6 +23,9 @@ REQUIRED_WEB_ASSETS = (
     Path("templates/leaderboard.html"),
     Path("templates/components/game_card.html"),
     Path("templates/components/shared_feedback.html"),
+    Path("templates/games/daily_spin.html"),
+    Path("templates/games/prediction_card.html"),
+    Path("templates/games/skill_check.html"),
     Path("static/css/app.css"),
     Path("static/js/core/api-client.js"),
     Path("static/js/core/clock.js"),
@@ -30,6 +33,9 @@ REQUIRED_WEB_ASSETS = (
     Path("static/js/core/player-store.js"),
     Path("static/js/core/state.js"),
     Path("static/js/components/shared.js"),
+    Path("static/js/games/daily-spin.js"),
+    Path("static/js/games/prediction-card.js"),
+    Path("static/js/games/skill-check.js"),
     Path("static/js/app.js"),
     Path("static/vendor/alpine-csp-3.15.12.min.js"),
 )
@@ -100,7 +106,7 @@ async def lobby(request: Request, session: Session) -> HTMLResponse:
 
 @router.get("/games/{game_key}", response_class=HTMLResponse, name="game_page")
 async def game_page(game_key: str, request: Request, session: Session) -> HTMLResponse:
-    """Render the shared game stage before cartridge behavior is introduced."""
+    """Render one server-authoritative game cartridge in the shared shell."""
 
     games = await _game_cards(session)
     game = next((candidate for candidate in games if candidate.key == game_key), None)
