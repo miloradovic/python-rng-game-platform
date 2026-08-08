@@ -11,6 +11,7 @@
     <script defer src="{{ url_for('static', path='/js/core/state.js') }}"></script>
     <script defer src="{{ url_for('static', path='/js/core/api-client.js') }}"></script>
     <script defer src="{{ url_for('static', path='/js/core/player-store.js') }}"></script>
+    <script defer src="{{ url_for('static', path='/js/core/preferences.js') }}"></script>
     <script defer src="{{ url_for('static', path='/js/core/operation-journal.js') }}"></script>
     <script defer src="{{ url_for('static', path='/js/core/clock.js') }}"></script>
     <script defer src="{{ url_for('static', path='/js/components/shared.js') }}"></script>
@@ -57,10 +58,15 @@
           <a href="{{ url_for('leaderboard_page') }}"{% if page == 'leaderboard' %} aria-current="page"{% endif %}>Leaderboard</a>
           <span class="demo-boundary">Local demo</span>
         </nav>
-        <button class="player-chip" type="button" x-on:click="openIdentity">
-          <span class="player-chip-dot" aria-hidden="true"></span>
-          <span x-text="playerLabel">Choose player</span>
-        </button>
+        <div class="header-actions">
+          <button class="icon-button" id="preferences-button" type="button" x-on:click="openPreferences" aria-label="Motion and sound settings" aria-haspopup="dialog">
+            <span aria-hidden="true">⚙</span>
+          </button>
+          <button class="player-chip" id="player-menu-button" type="button" x-on:click="openIdentity" aria-haspopup="dialog">
+            <span class="player-chip-dot" aria-hidden="true"></span>
+            <span x-text="playerLabel">Choose player</span>
+          </button>
+        </div>
       </div>
     </header>
 

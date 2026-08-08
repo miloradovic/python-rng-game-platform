@@ -218,7 +218,7 @@
           ? `${segment.value} points from ${segment.key.replaceAll("_", " ")}`
           : "Authoritative result recorded";
         if (!segment) return 0;
-        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const reduced = window.ArcadeProof.preferences.reducedMotion();
         const turns = animate && !reduced ? 5 : 0;
         const rotation = turns * 360 + (-90 - segment.center);
         this.wheelStyle = `transform: rotate(${rotation}deg)`;
@@ -228,6 +228,7 @@
         this.status = "animating";
         const duration = this.presentResult(true);
         if (duration) await new Promise((resolve) => window.setTimeout(resolve, duration));
+        window.setTimeout(() => document.getElementById("spin-result-title")?.focus(), 0);
       },
       async loadProof() {
         if (!this.player || !this.outcome) return;

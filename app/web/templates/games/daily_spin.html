@@ -27,7 +27,7 @@
 
     <section class="result-panel" x-show="isResult" aria-labelledby="spin-result-title">
       <p class="result-kicker">Authoritative result</p>
-      <h2 id="spin-result-title" x-text="resultLabel"></h2>
+      <h2 id="spin-result-title" tabindex="-1" x-text="resultLabel"></h2>
       <p x-text="rewardLabel"></p>
       <p class="verified-badge" x-show="isVerified"><span aria-hidden="true">✓</span> Independently verified on the server</p>
       <button class="button button-primary" type="button" x-show="canClaim" x-on:click="claim" x-bind:disabled="busy">Claim points</button>

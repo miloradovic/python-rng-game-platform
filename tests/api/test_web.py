@@ -75,6 +75,7 @@ async def test_lobby_renders_catalogue_with_strict_browser_headers(application: 
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert response.headers["cross-origin-opener-policy"] == "same-origin"
+    assert response.headers["cross-origin-resource-policy"] == "same-origin"
     assert "default-src 'self'" in response.headers["content-security-policy"]
     assert "script-src 'self'" in response.headers["content-security-policy"]
     assert "unsafe-inline" not in response.headers["content-security-policy"]
@@ -122,6 +123,7 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
         "games/daily-spin.js",
         "games/prediction-card.js",
         "games/skill-check.js",
+        "core/preferences.js",
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application), base_url="http://test"
@@ -151,6 +153,28 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "lockedSubmission" in scripts[9].text
     assert "getPlayerRank" in scripts[6].text
     assert "topEntries" in scripts[6].text
+    assert "arcade-proof.preferences.v1" in scripts[10].text
+    assert "sound: false" in scripts[10].text
+    assert "prefers-reduced-motion" in scripts[10].text
+
+
+async def test_accessibility_preferences_and_api_cache_isolation(application: Any) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        lobby = await client.get("/")
+        skill = await client.get("/games/skill_check")
+        api = await client.get("/api/v1")
+
+    assert 'id="preferences-dialog"' in lobby.text
+    assert "Enable supplementary sounds" in lobby.text
+    assert 'aria-describedby="display-name-error"' in lobby.text
+    assert 'aria-haspopup="dialog"' in lobby.text
+    assert "number keys" in skill.text
+    assert 'id="skill-result-title" tabindex="-1"' in skill.text
+    assert api.status_code == 200
+    assert api.headers["cache-control"] == "no-store"
+    assert api.headers["cross-origin-resource-policy"] == "same-origin"
 
 
 async def test_player_csp_does_not_break_openapi_documentation(application: Any) -> None:

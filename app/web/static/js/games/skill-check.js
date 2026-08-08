@@ -21,6 +21,7 @@
       countdownLabel: "",
       timer: null,
       previewTimer: null,
+      keyboardHandler: null,
       get player() { return window.ArcadeProof.playerStore.current(); },
       get canStart() {
         return !this.busy && ["ready", "result"].includes(this.status) && this.session?.status !== "active";
@@ -44,8 +45,15 @@
       get rewardLabel() { return this.reward ? `${this.reward.value} points · ${this.reward.status}` : ""; },
       async initialize() {
         this.refreshDigits();
+        this.keyboardHandler = (event) => this.handleKey(event);
+        window.addEventListener("keydown", this.keyboardHandler);
         window.addEventListener("arcade-proof:player", () => this.load());
         await this.load();
+      },
+      destroy() {
+        window.removeEventListener("keydown", this.keyboardHandler);
+        window.clearInterval(this.timer);
+        window.clearTimeout(this.previewTimer);
       },
       refreshDigits() {
         this.digits = Array.from({ length: 10 }, (_, digit) => ({
@@ -172,18 +180,31 @@
         window.clearTimeout(this.previewTimer);
         this.phase = "preview";
         this.message = "Memorize the server-generated sequence. It will hide shortly.";
-        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const reduced = window.ArcadeProof.preferences.reducedMotion();
         this.previewTimer = window.setTimeout(() => {
           this.phase = "input";
           this.message = "Enter unique digits in order. The countdown is guidance; the server enforces expiry.";
         }, reduced ? 1200 : 2600);
       },
       enterDigit(event) {
+        this.addDigit(Number(event.currentTarget.dataset.digit));
+      },
+      addDigit(digit) {
         if (!this.isInput || this.busy || this.lockedSubmission) return;
-        const digit = Number(event.currentTarget.dataset.digit);
         if (!Number.isInteger(digit) || this.actions.includes(digit) || this.actions.length >= this.sequence.length) return;
         this.actions.push(digit);
         this.refreshDigits();
+      },
+      handleKey(event) {
+        if (!this.isInput || document.querySelector("dialog[open]")) return;
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+        if (/^[0-9]$/.test(event.key)) {
+          event.preventDefault();
+          this.addDigit(Number(event.key));
+        } else if (event.key === "Backspace") {
+          event.preventDefault();
+          this.undo();
+        }
       },
       undo() {
         if (!this.isInput || this.busy || this.lockedSubmission) return;
@@ -208,6 +229,7 @@
           const state = await window.ArcadeProof.api.getGameState(this.player.id, gameKey);
           this.reward = state.session?.reward || null;
           await this.submitFinalScore();
+          window.setTimeout(() => document.getElementById("skill-result-title")?.focus(), 0);
         } catch (error) {
           this.status = error.code === "session_expired" ? "expired" : "recovering";
           this.message = error.message;

@@ -21,11 +21,19 @@ document.addEventListener("alpine:init", () => {
     },
 
     openIdentity() {
+      window.ArcadeProof.dialogTrigger = document.activeElement;
       const dialog = document.getElementById("identity-dialog");
+      if (dialog && !dialog.open) dialog.showModal();
+    },
+
+    openPreferences() {
+      window.ArcadeProof.dialogTrigger = document.activeElement;
+      const dialog = document.getElementById("preferences-dialog");
       if (dialog && !dialog.open) dialog.showModal();
     },
   }));
   window.Alpine.data("identityManager", window.ArcadeProof.components.identityManager);
+  window.Alpine.data("preferenceManager", window.ArcadeProof.components.preferenceManager);
   window.Alpine.data("networkStatus", window.ArcadeProof.components.networkStatus);
   window.Alpine.data("operationRecovery", window.ArcadeProof.components.operationRecovery);
   window.Alpine.data("toastRegion", window.ArcadeProof.components.toastRegion);

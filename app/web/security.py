@@ -27,6 +27,10 @@ def _is_player_surface(path: str) -> bool:
     return path == "/" or path == "/leaderboard" or path.startswith(("/games/", "/static/"))
 
 
+def _is_api_surface(path: str) -> bool:
+    return path == "/api/v1" or path.startswith("/api/v1/")
+
+
 def install_web_security(application: FastAPI) -> None:
     """Apply browser defenses without breaking FastAPI's external-asset API docs."""
 
@@ -42,6 +46,7 @@ def install_web_security(application: FastAPI) -> None:
             "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
         )
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
 
         if _is_player_surface(request.url.path):
             response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
@@ -49,6 +54,6 @@ def install_web_security(application: FastAPI) -> None:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         elif request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "public, max-age=3600"
-        elif _is_player_surface(request.url.path):
+        elif _is_api_surface(request.url.path) or _is_player_surface(request.url.path):
             response.headers["Cache-Control"] = "no-store"
         return response

@@ -17,7 +17,8 @@
     <p class="countdown" x-show="countdownLabel"><span x-text="countdownPrefix"></span> <strong x-text="countdownLabel"></strong></p>
     <button class="button button-primary game-action" type="button" x-show="canStart" x-on:click="start" x-bind:disabled="busy" x-text="actionLabel"></button>
     <div class="skill-input" x-show="isInput">
-      <p>Your sequence: <strong x-text="enteredLabel"></strong></p>
+      <p>Your sequence: <strong x-text="enteredLabel" aria-live="polite"></strong></p>
+      <p class="input-help">Use the digit buttons or number keys. Backspace undoes the last digit.</p>
       <div class="digit-grid" role="group" aria-label="Enter unique digits">
         <template x-for="item in digits" x-bind:key="item.digit">
           <button type="button" x-bind:class="item.className" x-bind:data-digit="item.digit" x-bind:aria-label="item.label" x-bind:disabled="item.disabled" x-on:click="enterDigit" x-text="item.digit"></button>
@@ -30,7 +31,7 @@
     </div>
     <section class="result-panel" x-show="isResult" aria-labelledby="skill-result-title">
       <p class="result-kicker">Authoritative score</p>
-      <h2 id="skill-result-title" x-text="scoreLabel"></h2>
+      <h2 id="skill-result-title" tabindex="-1" x-text="scoreLabel"></h2>
       <p x-text="accuracyLabel"></p>
       <p>The score uses the correct prefix only. Local timing does not increase or reduce it.</p>
       <p x-text="rewardLabel"></p>

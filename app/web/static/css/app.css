@@ -194,6 +194,9 @@
   }
 
   .primary-nav a {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
     padding: 0.65rem 0.9rem;
     border-radius: 999px;
     color: var(--muted);
@@ -236,6 +239,26 @@
     height: 1px;
     margin: 0.3rem auto;
     background: currentcolor;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .icon-button {
+    display: grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: rgb(255 255 255 / 5%);
+    color: var(--white);
+    cursor: pointer;
+    font-size: 1.1rem;
   }
 
   .eyebrow {
@@ -1377,6 +1400,7 @@
   }
 
   .identity-form input {
+    min-height: 3rem;
     min-width: 0;
     flex: 1;
     padding: 0.75rem 0.9rem;
@@ -1384,6 +1408,10 @@
     border-radius: 999px;
     background: var(--ink-900);
     color: var(--white);
+  }
+
+  .identity-form input[aria-invalid="true"] {
+    border-color: #ffb0a8;
   }
 
   .form-error {
@@ -1425,6 +1453,47 @@
     align-items: end;
     margin-top: var(--space-4);
     border-top: 1px solid var(--border);
+  }
+
+  .preference-list {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+  }
+
+  .preference-control {
+    display: flex;
+    min-height: 4.5rem;
+    align-items: start;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .preference-control input {
+    width: 1.5rem;
+    height: 1.5rem;
+    flex: 0 0 auto;
+    margin: 0.1rem 0 0;
+    accent-color: var(--teal-strong);
+  }
+
+  .preference-control span {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .preference-control small,
+  .preference-note,
+  .input-help {
+    color: var(--muted);
+  }
+
+  .preference-note {
+    min-height: 1.6rem;
+    margin-top: var(--space-3);
   }
 }
 
@@ -1871,6 +1940,19 @@
 }
 
 @layer utilities {
+  html[data-reduce-motion="true"] {
+    scroll-behavior: auto;
+  }
+
+  html[data-reduce-motion="true"] *,
+  html[data-reduce-motion="true"] *::before,
+  html[data-reduce-motion="true"] *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
   @media (max-width: 38rem) {
     .header-inner {
       gap: 0.5rem;
@@ -1882,7 +1964,6 @@
 
     .player-chip {
       max-width: 8.5rem;
-      margin-left: auto;
     }
 
     .identity-form > div,

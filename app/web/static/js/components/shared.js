@@ -3,6 +3,14 @@
 (() => {
   function notify(message, kind = "info") {
     window.dispatchEvent(new CustomEvent("arcade-proof:toast", { detail: { message, kind } }));
+    window.ArcadeProof.preferences.playCue(kind);
+  }
+
+  function closeDialog(id) {
+    document.getElementById(id)?.close();
+    const trigger = window.ArcadeProof.dialogTrigger;
+    window.ArcadeProof.dialogTrigger = null;
+    if (trigger instanceof HTMLElement) window.setTimeout(() => trigger.focus(), 0);
   }
 
   function identityManager() {
@@ -29,7 +37,7 @@
         const dialog = document.getElementById("identity-dialog");
         if (dialog && !dialog.open) dialog.showModal();
       },
-      close() { document.getElementById("identity-dialog")?.close(); },
+      close() { closeDialog("identity-dialog"); },
       async create() {
         const name = this.displayName.trim();
         if (name.length < 2) {
@@ -66,6 +74,45 @@
         this.refresh();
         this.error = "Create or restore a local demo player to continue.";
       },
+    };
+  }
+
+  function preferenceManager() {
+    return {
+      reduceMotion: false,
+      sound: false,
+      status: "Sounds are off by default.",
+      limitedStorage: !window.ArcadeProof.preferences.persistent,
+      initialize() {
+        const settings = window.ArcadeProof.preferences.snapshot();
+        this.reduceMotion = settings.reduceMotion;
+        this.sound = settings.sound;
+        this.status = window.ArcadeProof.preferences.reducedMotion()
+          ? "Reduced motion is active."
+          : "Standard motion is active; sounds are off unless enabled.";
+      },
+      save() {
+        window.ArcadeProof.preferences.save({
+          reduceMotion: this.reduceMotion,
+          sound: this.sound,
+        });
+      },
+      setMotion(event) {
+        this.reduceMotion = event.currentTarget.checked;
+        this.save();
+        this.status = window.ArcadeProof.preferences.reducedMotion()
+          ? "Reduced motion is active."
+          : "Standard motion is active.";
+      },
+      setSound(event) {
+        this.sound = event.currentTarget.checked;
+        this.save();
+        this.status = this.sound
+          ? "Supplementary sounds are enabled."
+          : "Sounds are off. Results remain available as text.";
+        if (this.sound) window.ArcadeProof.preferences.playCue("success");
+      },
+      close() { closeDialog("preferences-dialog"); },
     };
   }
 
@@ -184,6 +231,12 @@
   }
 
   window.ArcadeProof = window.ArcadeProof || {};
-  window.ArcadeProof.components = { identityManager, networkStatus, operationRecovery, toastRegion };
+  window.ArcadeProof.components = {
+    identityManager,
+    networkStatus,
+    operationRecovery,
+    preferenceManager,
+    toastRegion,
+  };
   window.ArcadeProof.notify = notify;
 })();

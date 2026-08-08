@@ -8,23 +8,23 @@
   </template>
 </div>
 
-<dialog class="identity-dialog" id="identity-dialog" x-data="identityManager" x-init="initialize">
+<dialog class="identity-dialog" id="identity-dialog" x-data="identityManager" x-init="initialize" aria-labelledby="identity-title" aria-describedby="identity-description">
   <div class="dialog-heading">
     <div>
       <p class="eyebrow"><span></span> Local demonstration</p>
-      <h2>Choose a demo player</h2>
+      <h2 id="identity-title">Choose a demo player</h2>
     </div>
     <button class="dialog-close" type="button" x-on:click="close" aria-label="Close player dialog">×</button>
   </div>
-  <p>Your player ID is saved only in this browser. It is a demo boundary, not production authentication.</p>
+  <p id="identity-description">Your player ID is saved only in this browser. It is a demo boundary, not production authentication.</p>
   <form class="identity-form" x-on:submit.prevent="create" novalidate>
     <label for="display-name">Display name</label>
     <div>
-      <input id="display-name" name="display_name" x-model="displayName" minlength="2" maxlength="50" autocomplete="nickname" required>
+      <input id="display-name" name="display_name" x-model="displayName" minlength="2" maxlength="50" autocomplete="nickname" required autofocus aria-describedby="display-name-error" x-bind:aria-invalid="hasError">
       <button class="button button-primary" type="submit" x-bind:disabled="busy">Create player</button>
     </div>
   </form>
-  <p class="form-error" x-show="hasError" x-text="error" role="alert"></p>
+  <p class="form-error" id="display-name-error" x-show="hasError" x-text="error" role="alert"></p>
   <div class="saved-players" x-show="hasPlayers">
     <h3>Saved in this browser</h3>
     <template x-for="player in players" x-bind:key="player.id">
@@ -36,5 +36,31 @@
   <div class="dialog-footer">
     <p x-show="limitedStorage">Private browsing has limited refresh recovery to this tab.</p>
     <button class="text-button danger" type="button" x-show="hasPlayers" x-on:click="clear">Clear saved players</button>
+  </div>
+</dialog>
+
+<dialog class="identity-dialog preferences-dialog" id="preferences-dialog" x-data="preferenceManager" x-init="initialize" aria-labelledby="preferences-title" aria-describedby="preferences-description">
+  <div class="dialog-heading">
+    <div>
+      <p class="eyebrow"><span></span> Presentation settings</p>
+      <h2 id="preferences-title">Motion and sound</h2>
+    </div>
+    <button class="dialog-close" type="button" x-on:click="close" aria-label="Close presentation settings">×</button>
+  </div>
+  <p id="preferences-description">These local preferences change presentation only. Results, scores, rewards, and timers still come from the server.</p>
+  <div class="preference-list">
+    <label class="preference-control">
+      <input type="checkbox" x-bind:checked="reduceMotion" x-on:change="setMotion">
+      <span><strong>Reduce motion</strong><small>Skip wheel turns, card flips, and other decorative movement.</small></span>
+    </label>
+    <label class="preference-control">
+      <input type="checkbox" x-bind:checked="sound" x-on:change="setSound">
+      <span><strong>Enable supplementary sounds</strong><small>Off by default. Every result and message remains available as text.</small></span>
+    </label>
+  </div>
+  <p class="preference-note" role="status" aria-live="polite" x-text="status"></p>
+  <div class="dialog-footer">
+    <p x-show="limitedStorage">These preferences are limited to this tab because persistent storage is unavailable.</p>
+    <button class="button button-primary" type="button" x-on:click="close">Done</button>
   </div>
 </dialog>

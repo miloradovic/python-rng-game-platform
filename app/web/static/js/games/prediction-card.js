@@ -156,6 +156,10 @@
           this.message = this.outcome.result.correct
             ? "Correct prediction. The server awarded the configured reward."
             : "Not correct this time. The recorded reward is zero points.";
+          window.setTimeout(
+            () => document.getElementById("prediction-result-title")?.focus(),
+            0,
+          );
           await this.recoverReward();
         } catch (error) {
           this.status = error.code === "session_expired" ? "expired" : "recovering";
@@ -172,7 +176,7 @@
         this.cardSymbol = authoritative === "red" ? "♦" : "♠";
         this.cardClass = `prediction-card is-revealed ${authoritative}`;
         this.resultLabel = `${result.correct ? "Correct" : "Incorrect"}: you chose ${result.player_choice}; the server card was ${authoritative}.`;
-        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const reduced = window.ArcadeProof.preferences.reducedMotion();
         return animate && !reduced ? 700 : 0;
       },
       async recoverReward() {

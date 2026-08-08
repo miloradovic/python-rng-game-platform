@@ -33,6 +33,7 @@ REQUIRED_WEB_ASSETS = (
     Path("static/js/core/clock.js"),
     Path("static/js/core/operation-journal.js"),
     Path("static/js/core/player-store.js"),
+    Path("static/js/core/preferences.js"),
     Path("static/js/core/state.js"),
     Path("static/js/components/shared.js"),
     Path("static/js/components/leaderboard.js"),
