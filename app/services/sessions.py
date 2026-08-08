@@ -2,13 +2,23 @@
 
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
 from app.game_rules import InvalidRulesInputError, rules_for
-from app.models import FairnessProofStatus, GameSession, PlayerStatus, SessionStatus
+from app.models import (
+    FairnessProof,
+    FairnessProofStatus,
+    FinalScore,
+    GameSession,
+    Outcome,
+    PlayerStatus,
+    Reward,
+    SessionStatus,
+)
 from app.schemas import game_config_adapter
 from app.services._common import _owned_session, _request_fingerprint, utc_now
 from app.services.errors import (
@@ -31,6 +41,20 @@ from app.session_transitions import (
 from app.session_transitions import (
     expire_if_due as expire_if_due,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerGameState:
+    """Owner-scoped durable recovery state for one player and game."""
+
+    server_time: datetime
+    next_play_at: datetime | None
+    game_key: str
+    game_session: GameSession | None
+    outcome: Outcome | None
+    reward: Reward | None
+    fairness_proof: FairnessProof | None
+    final_score: FinalScore | None
 
 
 async def create_session(
@@ -112,6 +136,67 @@ async def retrieve_session(
     if await finalize_expired_session(session, game_session, now=clock()):
         await session.commit()
     return game_session
+
+
+async def retrieve_player_game_state(
+    session: AsyncSession,
+    *,
+    player_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    game_key: str,
+    clock: Callable[[], datetime] = utc_now,
+) -> PlayerGameState:
+    """Compose authoritative state needed to recover an interrupted browser operation."""
+
+    if player_id != owner_id:
+        raise ForbiddenError
+    player = await repositories.lock_player(session, player_id)
+    if player is None:
+        raise NotFoundError
+    game = await repositories.get_game(session, game_key)
+    if game is None:
+        raise NotFoundError
+    config = await repositories.get_active_config(session, game.id)
+    if config is None:
+        raise NotFoundError
+
+    now = clock()
+    expired_sessions = await repositories.lock_expired_active_sessions(
+        session, player.id, game.id, now
+    )
+    for expired_session in expired_sessions:
+        await finalize_expired_session(session, expired_session, now=now)
+
+    latest = await repositories.latest_session(session, player.id, game.id)
+    payload = game_config_adapter.validate_python(config.payload)
+    next_play_at = None
+    if latest is not None:
+        available_at = latest.created_at + timedelta(seconds=payload.cooldown_seconds)
+        if available_at > now:
+            next_play_at = available_at
+
+    outcome = None
+    reward = None
+    fairness_proof = None
+    final_score = None
+    if latest is not None:
+        outcome = await repositories.get_outcome_by_session(session, latest.id)
+        reward = await repositories.get_reward_by_session(session, latest.id)
+        fairness_proof = await repositories.get_fairness_proof_by_session(session, latest.id)
+        final_score = await repositories.get_final_score_by_session(session, latest.id)
+
+    if expired_sessions:
+        await session.commit()
+    return PlayerGameState(
+        server_time=now,
+        next_play_at=next_play_at,
+        game_key=game.key,
+        game_session=latest,
+        outcome=outcome,
+        reward=reward,
+        fairness_proof=fairness_proof,
+        final_score=final_score,
+    )
 
 
 async def cancel_session(

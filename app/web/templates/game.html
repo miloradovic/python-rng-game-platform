@@ -16,6 +16,34 @@
           <p>The shared stage is ready. Live server-authoritative play will be connected after identity and recovery capabilities.</p>
         </div>
       </div>
+      <section
+        class="recovery-panel"
+        data-game-key="{{ game.key }}"
+        x-data="operationRecovery"
+        x-init="initialize"
+        aria-labelledby="recovery-title"
+      >
+        <div>
+          <p class="eyebrow"><span></span> Recovery check</p>
+          <h2 id="recovery-title">Your latest server state</h2>
+        </div>
+        <p class="recovery-status" role="status" aria-live="polite" x-text="message"></p>
+        <div class="recovery-details" x-show="hasSession">
+          <dl>
+            <div><dt>Status</dt><dd x-text="sessionStatus"></dd></div>
+            <div><dt>Latest result</dt><dd x-text="resultLabel"></dd></div>
+            <div><dt>Reward</dt><dd x-text="rewardLabel"></dd></div>
+          </dl>
+          <p class="countdown" x-show="hasCountdown">
+            Ready again <strong x-text="countdownLabel"></strong>
+          </p>
+        </div>
+        <div class="recovery-actions">
+          <button class="button button-secondary" type="button" x-on:click="recover" x-bind:disabled="busy">Refresh state</button>
+          <button class="text-button" type="button" x-show="canCancel" x-on:click="cancel" x-bind:disabled="busy">Cancel active play</button>
+          <button class="text-button" type="button" x-show="hasJournal" x-on:click="discardJournal">Discard saved browser operation</button>
+        </div>
+      </section>
     </div>
   </section>
 {% endblock %}

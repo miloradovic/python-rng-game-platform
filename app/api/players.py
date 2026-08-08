@@ -9,13 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import get_player_id
 from app.database import get_session as get_database_session
 from app.schemas import (
+    FairnessStateResponse,
+    FinalScoreResponse,
     GameConfigResponse,
     GameListResponse,
     GameResponse,
+    OutcomeResponse,
     PlayerCreate,
+    PlayerGameSessionResponse,
+    PlayerGameStateResponse,
     PlayerResponse,
+    RewardResponse,
 )
 from app.services import players as player_services
+from app.services import sessions as session_services
 
 router = APIRouter()
 Session = Annotated[AsyncSession, Depends(get_database_session)]
@@ -37,6 +44,61 @@ async def get_player(
 ) -> PlayerResponse:
     return PlayerResponse.model_validate(
         await player_services.retrieve_player(session, player_id, owner_id)
+    )
+
+
+@router.get("/players/{player_id}/game-state", response_model=PlayerGameStateResponse)
+async def get_player_game_state(
+    player_id: UUID,
+    session: Session,
+    owner_id: OwnerId,
+    game_key: Annotated[str, Query(min_length=1, max_length=40)],
+) -> PlayerGameStateResponse:
+    """Return authoritative state for browser recovery after an uncertain response."""
+
+    state = await session_services.retrieve_player_game_state(
+        session,
+        player_id=player_id,
+        owner_id=owner_id,
+        game_key=game_key,
+    )
+    session_response = None
+    if state.game_session is not None:
+        fairness = None
+        if state.fairness_proof is not None:
+            fairness = FairnessStateResponse(
+                proof_id=state.fairness_proof.id,
+                status=state.fairness_proof.status.value,
+                outcome_id=state.fairness_proof.outcome_id,
+            )
+        session_response = PlayerGameSessionResponse(
+            id=state.game_session.id,
+            request_id=state.game_session.request_id,
+            game_key=state.game_key,
+            config_version_id=state.game_session.config_version_id,
+            status=state.game_session.status,
+            created_at=state.game_session.created_at,
+            expires_at=state.game_session.expires_at,
+            ended_at=state.game_session.ended_at,
+            challenge=state.game_session.challenge,
+            outcome=(
+                OutcomeResponse.model_validate(state.outcome) if state.outcome is not None else None
+            ),
+            reward=(
+                RewardResponse.model_validate(state.reward) if state.reward is not None else None
+            ),
+            fairness=fairness,
+            final_score=(
+                FinalScoreResponse.model_validate(state.final_score)
+                if state.final_score is not None
+                else None
+            ),
+        )
+    return PlayerGameStateResponse(
+        server_time=state.server_time,
+        next_play_at=state.next_play_at,
+        game_key=state.game_key,
+        session=session_response,
     )
 
 

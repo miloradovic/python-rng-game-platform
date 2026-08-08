@@ -139,6 +139,15 @@ class SessionResponse(BaseModel):
     challenge: dict[str, Any]
 
 
+class FairnessStateResponse(BaseModel):
+    """Recovery-safe proof reference without unrevealed seed material."""
+
+    model_config = ConfigDict(frozen=True)
+    proof_id: UUID
+    status: str
+    outcome_id: UUID | None
+
+
 class PlayRequest(BaseModel):
     """Intent-only gameplay input; authoritative fields are forbidden."""
 
@@ -298,6 +307,35 @@ class FinalScoreResponse(BaseModel):
     completed_at: datetime
     final_score: int
     created_at: datetime
+
+
+class PlayerGameSessionResponse(BaseModel):
+    """Latest owner-checked session and its recoverable durable results."""
+
+    model_config = ConfigDict(frozen=True)
+    id: UUID
+    request_id: UUID
+    game_key: str
+    config_version_id: UUID
+    status: SessionStatus
+    created_at: datetime
+    expires_at: datetime
+    ended_at: datetime | None
+    challenge: dict[str, Any]
+    outcome: OutcomeResponse | None
+    reward: RewardResponse | None
+    fairness: FairnessStateResponse | None
+    final_score: FinalScoreResponse | None
+
+
+class PlayerGameStateResponse(BaseModel):
+    """Authoritative recovery read model for one owner and game."""
+
+    model_config = ConfigDict(frozen=True)
+    server_time: datetime
+    next_play_at: datetime | None
+    game_key: str
+    session: PlayerGameSessionResponse | None
 
 
 class LeaderboardEntry(BaseModel):

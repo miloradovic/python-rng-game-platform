@@ -23,6 +23,17 @@ async def lock_fairness_proof_by_session(
     return proof
 
 
+async def get_fairness_proof_by_session(
+    session: AsyncSession, session_id: uuid.UUID
+) -> FairnessProof | None:
+    """Load the unique fairness proof associated with a session."""
+
+    proof: FairnessProof | None = await session.scalar(
+        select(FairnessProof).where(FairnessProof.session_id == session_id)
+    )
+    return proof
+
+
 async def add_fairness_proof(session: AsyncSession, proof: FairnessProof) -> FairnessProof:
     session.add(proof)
     await session.flush()

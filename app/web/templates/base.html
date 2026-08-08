@@ -8,6 +8,12 @@
     <meta name="description" content="A server-authoritative, free-to-play game platform demonstration.">
     <title>{% block title %}Arcade Proof{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <script defer src="{{ url_for('static', path='/js/core/state.js') }}"></script>
+    <script defer src="{{ url_for('static', path='/js/core/api-client.js') }}"></script>
+    <script defer src="{{ url_for('static', path='/js/core/player-store.js') }}"></script>
+    <script defer src="{{ url_for('static', path='/js/core/operation-journal.js') }}"></script>
+    <script defer src="{{ url_for('static', path='/js/core/clock.js') }}"></script>
+    <script defer src="{{ url_for('static', path='/js/components/shared.js') }}"></script>
     <script defer src="{{ url_for('static', path='/js/app.js') }}"></script>
     <script
       defer
@@ -47,6 +53,10 @@
           <a href="{{ url_for('leaderboard_page') }}"{% if page == 'leaderboard' %} aria-current="page"{% endif %}>Leaderboard</a>
           <span class="demo-boundary">Local demo</span>
         </nav>
+        <button class="player-chip" type="button" x-on:click="openIdentity">
+          <span class="player-chip-dot" aria-hidden="true"></span>
+          <span x-text="playerLabel">Choose player</span>
+        </button>
       </div>
     </header>
 
@@ -57,6 +67,8 @@
     <main id="main-content" tabindex="-1">
       {% block content %}{% endblock %}
     </main>
+
+    {% include "components/shared_feedback.html" %}
 
     <footer class="site-footer">
       <div class="shell footer-inner">

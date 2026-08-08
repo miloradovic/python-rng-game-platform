@@ -88,11 +88,20 @@ async def test_game_and_leaderboard_placeholders_render(application: Any) -> Non
 
 
 async def test_static_assets_are_local_and_cache_deliberately(application: Any) -> None:
+    phase_three_assets = (
+        "core/state.js",
+        "core/api-client.js",
+        "core/player-store.js",
+        "core/operation-journal.js",
+        "core/clock.js",
+        "components/shared.js",
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application), base_url="http://test"
     ) as client:
         stylesheet = await client.get("/static/css/app.css")
         alpine = await client.get("/static/vendor/alpine-csp-3.15.12.min.js")
+        scripts = [await client.get(f"/static/js/{path}") for path in phase_three_assets]
 
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
@@ -102,6 +111,11 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "javascript" in alpine.headers["content-type"]
     assert alpine.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert len(alpine.content) == 61_522
+    assert all(script.status_code == 200 for script in scripts)
+    assert all("javascript" in script.headers["content-type"] for script in scripts)
+    assert all(script.headers["cache-control"] == "public, max-age=3600" for script in scripts)
+    assert "X-Player-ID" in scripts[1].text
+    assert "clientSeed" in scripts[3].text
 
 
 async def test_player_csp_does_not_break_openapi_documentation(application: Any) -> None:

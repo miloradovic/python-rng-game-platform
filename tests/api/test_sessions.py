@@ -62,6 +62,14 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
                     "game_key": "skill_check",
                 },
             )
+            active_state = await client.get(
+                f"/api/v1/players/{player_id}/game-state?game_key=skill_check",
+                headers={"X-Player-ID": str(player_id)},
+            )
+            wrong_owner_state = await client.get(
+                f"/api/v1/players/{player_id}/game-state?game_key=skill_check",
+                headers={"X-Player-ID": str(uuid4())},
+            )
             forged = await client.post(
                 f"/api/v1/sessions/{created.json()['id']}/play",
                 headers={"X-Player-ID": str(player_id)},
@@ -91,6 +99,15 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
                 f"/api/v1/sessions/{created.json()['id']}/claim",
                 headers={"X-Player-ID": str(player_id)},
                 json={},
+            )
+            score = await client.post(
+                "/api/v1/scores",
+                headers={"X-Player-ID": str(player_id)},
+                json={"session_id": created.json()["id"]},
+            )
+            completed_state = await client.get(
+                f"/api/v1/players/{player_id}/game-state?game_key=skill_check",
+                headers={"X-Player-ID": str(player_id)},
             )
             retried_claim = await client.post(
                 f"/api/v1/sessions/{created.json()['id']}/claim",
@@ -128,6 +145,13 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
         assert created.status_code == 201
         assert created.json()["config_version_id"]
         assert retried.json()["id"] == created.json()["id"]
+        assert active_state.status_code == 200
+        assert active_state.json()["game_key"] == "skill_check"
+        assert active_state.json()["server_time"]
+        assert active_state.json()["session"]["status"] == "active"
+        assert active_state.json()["session"]["challenge"] == created.json()["challenge"]
+        assert active_state.json()["session"]["outcome"] is None
+        assert wrong_owner_state.status_code == 403
         assert forged.status_code == 422
         assert played.status_code == 200
         authoritative_score = played.json()["result"]["score"]
@@ -138,6 +162,14 @@ async def test_create_session_binds_server_config_and_enforces_owner() -> None:
         assert claimed.status_code == 200
         assert claimed.json()["value"] == authoritative_score
         assert claimed.json()["status"] == "claimed"
+        assert score.status_code == 201
+        assert completed_state.status_code == 200
+        recovered = completed_state.json()["session"]
+        assert recovered["status"] == "completed"
+        assert recovered["outcome"] == played.json()
+        assert recovered["reward"] == claimed.json()
+        assert recovered["final_score"] == score.json()
+        assert recovered["fairness"] is None
         assert retried_claim.json() == claimed.json()
         assert rewards.json()["items"] == [claimed.json()]
         assert audit.status_code == 200

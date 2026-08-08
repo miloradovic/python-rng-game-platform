@@ -43,10 +43,12 @@ from app.services.leaderboards import (
 from app.services.players import active_config, catalogue, create_player, retrieve_player
 from app.services.rewards import claim_reward, claim_session_reward, player_rewards, reward_value
 from app.services.sessions import (
+    PlayerGameState,
     cancel_active,
     cancel_session,
     create_session,
     expire_if_due,
+    retrieve_player_game_state,
     retrieve_session,
 )
 
@@ -67,6 +69,7 @@ __all__ = [
     "LeaderboardPeriodClosedError",
     "LeaderboardPeriodOpenError",
     "NotFoundError",
+    "PlayerGameState",
     "RevealedFairnessProof",
     "RewardUnavailableError",
     "SessionExpiredError",
@@ -93,6 +96,7 @@ __all__ = [
     "retrieve_fairness_proof",
     "retrieve_outcome_audit",
     "retrieve_player",
+    "retrieve_player_game_state",
     "retrieve_session",
     "reward_value",
     "settle_leaderboard",

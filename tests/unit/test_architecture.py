@@ -222,6 +222,7 @@ def test_domain_router_is_composition_only_and_registers_every_public_route() ->
     assert registered == {
         ("POST", "/players"),
         ("GET", "/players/{player_id}"),
+        ("GET", "/players/{player_id}/game-state"),
         ("GET", "/games"),
         ("GET", "/games/{game_key}/config"),
         ("POST", "/sessions"),

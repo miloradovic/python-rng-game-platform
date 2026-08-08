@@ -93,6 +93,10 @@ async def test_daily_spin_commit_and_evaluate_are_authorized_and_idempotent() ->
             verification = await client.get(
                 f"/api/v1/fairness/outcomes/{outcome_id}/verify", headers=headers
             )
+            recovered_state = await client.get(
+                f"/api/v1/players/{player_id}/game-state?game_key=daily_spin",
+                headers=headers,
+            )
             forbidden_proof = await client.get(
                 f"/api/v1/fairness/outcomes/{outcome_id}/proof",
                 headers={"X-Player-ID": other.json()["id"]},
@@ -104,6 +108,14 @@ async def test_daily_spin_commit_and_evaluate_are_authorized_and_idempotent() ->
                 "outcome_id": outcome_id,
                 "verified": True,
                 "code": "verified",
+            }
+            assert recovered_state.status_code == 200
+            assert recovered_state.json()["session"]["outcome"] == evaluated.json()["outcome"]
+            assert recovered_state.json()["session"]["reward"] == evaluated.json()["reward"]
+            assert recovered_state.json()["session"]["fairness"] == {
+                "proof_id": committed.json()["proof_id"],
+                "status": "revealed",
+                "outcome_id": outcome_id,
             }
             assert forbidden_proof.status_code == 403
     finally:

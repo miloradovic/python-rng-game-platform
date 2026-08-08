@@ -63,6 +63,8 @@ when you intentionally want to remove both development and test container data.
 ## API at a glance
 
 - `POST /api/v1/players`, sessions, play, claim, rewards, and audit reads.
+- `GET /api/v1/players/{player_id}/game-state?game_key=...` for owner-checked,
+  server-timestamped session, outcome, reward, fairness, score, and cooldown recovery.
 - `POST /api/v1/fairness/commit` and `/fairness/evaluate`; retrieve or verify a proof by outcome.
 - `POST /api/v1/scores`; read leaderboard and authenticated player rank.
 - `POST /api/v1/leaderboards/skill_check/settle` for an authorized, closed ISO week.

@@ -52,7 +52,7 @@ async def latest_session(
     game_session: GameSession | None = await session.scalar(
         select(GameSession)
         .where(GameSession.player_id == player_id, GameSession.game_id == game_id)
-        .order_by(GameSession.created_at.desc())
+        .order_by(GameSession.created_at.desc(), GameSession.id.desc())
         .limit(1)
     )
     return game_session

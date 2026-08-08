@@ -69,6 +69,17 @@ async def lock_reward_by_session(session: AsyncSession, session_id: uuid.UUID) -
     return reward
 
 
+async def get_reward_by_session(session: AsyncSession, session_id: uuid.UUID) -> Reward | None:
+    """Load the unique outcome reward for a session without taking a write lock."""
+
+    reward: Reward | None = await session.scalar(
+        select(Reward)
+        .join(Outcome, Outcome.id == Reward.outcome_id)
+        .where(Outcome.session_id == session_id)
+    )
+    return reward
+
+
 async def list_player_rewards(
     session: AsyncSession, player_id: uuid.UUID, limit: int, offset: int
 ) -> list[Reward]:
