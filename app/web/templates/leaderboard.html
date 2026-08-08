@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Weekly leaderboard · Arcade Proof{% endblock %}
+
+{% block content %}
+  <section class="stage-shell shell" aria-labelledby="leaderboard-title">
+    <p class="eyebrow"><span></span> Skill Check</p>
+    <h1 id="leaderboard-title">Weekly leaderboard</h1>
+    <p class="stage-lede">One player can submit more than one score. Entries use the same canonical server ordering everywhere.</p>
+    <div class="empty-state leaderboard-empty" role="status">
+      <span aria-hidden="true">◇</span>
+      <h2>Scores arrives soon...</h2>
+      <p>The responsive leaderboard shell is ready for canonical PostgreSQL-backed entries.</p>
+      <a class="button button-secondary" href="{{ url_for('lobby') }}">Return to lobby</a>
+    </div>
+  </section>
+{% endblock %}

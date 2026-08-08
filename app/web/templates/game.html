@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}{{ game.name }} · Arcade Proof{% endblock %}
+
+{% block content %}
+  <section class="stage-shell shell game-stage-{{ game.accent }}" aria-labelledby="game-title">
+    <a class="back-link" href="{{ url_for('lobby') }}"><span aria-hidden="true">←</span> Back to lobby</a>
+    <div class="stage-placeholder">
+      <p class="eyebrow"><span></span> {{ game.eyebrow }}</p>
+      <h1 id="game-title">{{ game.name }}</h1>
+      <p>{{ game.description }}</p>
+      <div class="placeholder-panel" role="status">
+        <span class="placeholder-icon" aria-hidden="true">◇</span>
+        <div>
+          <strong>Game cartridge is coming...</strong>
+          <p>The shared stage is ready. Live server-authoritative play will be connected after identity and recovery capabilities.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endblock %}

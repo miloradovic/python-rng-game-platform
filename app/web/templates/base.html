@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en" data-app-shell>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#07111f">
+    <meta name="description" content="A server-authoritative, free-to-play game platform demonstration.">
+    <title>{% block title %}Arcade Proof{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+    <script defer src="{{ url_for('static', path='/js/app.js') }}"></script>
+    <script
+      defer
+      src="{{ url_for('static', path='/vendor/alpine-csp-3.15.12.min.js') }}"
+      integrity="sha384-MKLWq9B+VC0W3U8kDIBEsSu8uCnQ1B0UQpRaB+F7uR5ocXFbymMUKuLRntu5LLdu"
+    ></script>
+  </head>
+  <body x-data="shell" x-init="markReady">
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="{{ url_for('lobby') }}" aria-label="Arcade Proof home">
+          <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+            <path d="M20 2 35 10.5v19L20 38 5 29.5v-19L20 2Z"/>
+            <path d="m13 23 4-11h6l4 11-7 5-7-5Z"/>
+          </svg>
+          <span><strong>Arcade</strong> Proof</span>
+        </a>
+        <button
+          class="nav-toggle"
+          type="button"
+          aria-controls="primary-navigation"
+          x-bind:aria-expanded="navOpen"
+          x-on:click="toggleNavigation"
+        >
+          <span class="sr-only">Toggle navigation</span>
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+        </button>
+        <nav
+          class="primary-nav"
+          id="primary-navigation"
+          aria-label="Primary navigation"
+          x-bind:class="navClass"
+        >
+          <a href="{{ url_for('lobby') }}"{% if page == 'lobby' %} aria-current="page"{% endif %}>Lobby</a>
+          <a href="{{ url_for('leaderboard_page') }}"{% if page == 'leaderboard' %} aria-current="page"{% endif %}>Leaderboard</a>
+          <span class="demo-boundary">Local demo</span>
+        </nav>
+      </div>
+    </header>
+
+    <noscript>
+      <div class="noscript-notice">JavaScript is required to play. You can still browse this server-rendered lobby.</div>
+    </noscript>
+
+    <main id="main-content" tabindex="-1">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <p>Free-to-play portfolio demo. No payments, cash value, or wagering.</p>
+        <p>Results and rewards come from the server.</p>
+      </div>
+    </footer>
+  </body>
+</html>

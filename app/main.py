@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.health import router as health_router
 from app.api.router import router as api_router
@@ -36,6 +37,9 @@ from app.services import (
     SessionExpiredError,
     SettlementForbiddenError,
 )
+from app.web.router import STATIC_ROOT, validate_web_assets
+from app.web.router import router as web_router
+from app.web.security import install_web_security
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Create one configured FastAPI application instance."""
 
     resolved_settings = settings or get_settings()
+    validate_web_assets()
     configure_logging(resolved_settings.log_level)
     metrics = MetricsRegistry()
 
@@ -108,8 +113,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(status_code=status_code, content={"error": {"code": error.code}})
 
     install_observability(application, metrics)
+    install_web_security(application)
     application.include_router(health_router)
     application.include_router(api_router)
+    application.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
+    application.include_router(web_router)
     return application
 
 

@@ -1,0 +1,21 @@
+<article class="game-card game-card-{{ game.accent }}">
+  <div class="game-art" aria-hidden="true">
+    {% if game.key == "daily_spin" %}
+      <div class="mini-wheel"><span></span></div>
+    {% elif game.key == "prediction_card" %}
+      <div class="mini-cards"><span>◆</span><span>●</span></div>
+    {% elif game.key == "skill_check" %}
+      <div class="mini-sequence"><span>2</span><span>7</span><span>4</span></div>
+    {% else %}
+      <div class="mini-default">◇</div>
+    {% endif %}
+  </div>
+  <div class="game-card-body">
+    <p class="card-kicker">{{ game.eyebrow }}</p>
+    <h3>{{ game.name }}</h3>
+    <p>{{ game.description }}</p>
+    <a class="card-link" href="{{ url_for('game_page', game_key=game.key) }}">
+      Open game <span aria-hidden="true">↗</span>
+    </a>
+  </div>
+</article>

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Game lobby · Arcade Proof{% endblock %}
+
+{% block content %}
+  <section class="hero shell" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <p class="eyebrow"><span></span> Server-authoritative play</p>
+      <h1 id="hero-title">Three games.<br><em>Every result has receipts.</em></h1>
+      <p class="hero-lede">Playful on the surface, rigorous underneath. Outcomes, rewards, and scores are recorded by the server—not the animation.</p>
+      <div class="hero-actions">
+        <a class="button button-primary" href="#games">Explore the games</a>
+        <a class="text-link" href="{{ url_for('leaderboard_page') }}">View weekly scores <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+    <div class="proof-card" aria-label="Platform trust highlights">
+      <div class="proof-orbit" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p class="proof-kicker">Built for proof</p>
+      <strong>Server truth,<br>player-visible.</strong>
+      <dl>
+        <div><dt>Randomness</dt><dd>Cryptographic</dd></div>
+        <div><dt>Evidence</dt><dd>Durable</dd></div>
+        <div><dt>Retries</dt><dd>Safe</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="game-section shell" id="games" aria-labelledby="games-title">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow"><span></span> Choose your game</p>
+        <h2 id="games-title">Pick a challenge</h2>
+      </div>
+      <p>Each game uses a different interaction. The server always decides the result.</p>
+    </div>
+
+    {% if games %}
+      <div class="game-grid">
+        {% for game in games %}
+          {% include "components/game_card.html" %}
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty-state" role="status">
+        <span aria-hidden="true">◇</span>
+        <h3>The lobby is getting ready</h3>
+        <p>No active games are available. Seed the catalogue, then refresh this page.</p>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="trust-strip" aria-labelledby="trust-title">
+    <div class="shell trust-inner">
+      <div>
+        <p class="eyebrow"><span></span> What makes it trustworthy</p>
+        <h2 id="trust-title">The exciting part is visual.<br>The important part is durable.</h2>
+      </div>
+      <ol class="trust-steps">
+        <li><span>01</span><div><strong>You express intent</strong><p>Choose a game or an allowed action.</p></div></li>
+        <li><span>02</span><div><strong>The server decides</strong><p>Rules and immutable configuration determine the result.</p></div></li>
+        <li><span>03</span><div><strong>The record remains</strong><p>Outcomes, rewards, and evidence survive the animation.</p></div></li>
+      </ol>
+    </div>
+  </section>
+{% endblock %}

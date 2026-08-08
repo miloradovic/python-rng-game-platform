@@ -14,6 +14,7 @@ from app.api.leaderboards import router as leaderboards_router
 from app.api.players import router as players_router
 from app.api.rewards import router as rewards_router
 from app.api.sessions import router as sessions_router
+from app.web.router import router as web_router
 
 pytestmark = pytest.mark.unit
 APP_ROOT = Path("app")
@@ -118,7 +119,9 @@ def _find_import_cycle(graph: dict[str, set[str]]) -> tuple[str, ...] | None:
 
 def test_dependency_direction_has_no_reverse_imports() -> None:
     repository_imports = _imports(APP_ROOT / "repositories.py")
-    assert not any(name.startswith(("app.api", "app.services")) for name in repository_imports)
+    assert not any(
+        name.startswith(("app.api", "app.services", "app.web")) for name in repository_imports
+    )
 
     rules_imports = _imports(APP_ROOT / "game_rules.py")
     assert not any(
@@ -127,7 +130,7 @@ def test_dependency_direction_has_no_reverse_imports() -> None:
     )
 
     for path in (APP_ROOT / "services").glob("*.py"):
-        assert not any(name.startswith("app.api") for name in _imports(path)), path
+        assert not any(name.startswith(("app.api", "app.web")) for name in _imports(path)), path
 
     transition_imports = _imports(APP_ROOT / "session_transitions.py")
     assert not any(
@@ -238,3 +241,22 @@ def test_domain_router_is_composition_only_and_registers_every_public_route() ->
         ("GET", "/fairness/outcomes/{outcome_id}/proof"),
         ("GET", "/fairness/outcomes/{outcome_id}/verify"),
     }
+
+
+def test_web_adapter_has_only_page_routes_and_no_reverse_dependencies() -> None:
+    registered = {
+        (method, route.path)
+        for route in web_router.routes
+        if isinstance(route, APIRoute)
+        for method in (route.methods or set())
+    }
+    assert registered == {
+        ("GET", "/"),
+        ("GET", "/games/{game_key}"),
+        ("GET", "/leaderboard"),
+    }
+
+    for path in (APP_ROOT / "web").glob("*.py"):
+        assert not any(
+            name.startswith(("app.repositories", "app.persistence")) for name in _imports(path)
+        ), path
