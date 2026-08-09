@@ -68,6 +68,10 @@
   }
 }
 
+[x-cloak] {
+  display: none !important;
+}
+
 @layer base {
   body {
     min-width: 20rem;

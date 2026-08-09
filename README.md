@@ -31,10 +31,11 @@ Rush. Create or select a local demo identity from the header, then play each rea
 server flow:
 
 - Hourly Spin (`daily_spin` in the API) publishes a commitment, retains one
-  browser-generated client seed for exact recovery, animates only after the
-  authoritative result, retrieves the full reveal evidence, submits the configured
-  reward value as its score after the wheel finishes, asks the server to verify it,
-  and claims the recorded reward.
+  browser-generated client seed for exact recovery, and keeps the returned result
+  hidden until the result-directed wheel animation finishes. Reduced-motion players
+  see the wheel land and the result immediately. Only then does the browser submit
+  the configured reward value as its score, retrieve and verify the full reveal
+  evidence, and offer the recorded reward for collection.
 - Red or Black (`prediction_card` in the API) submits only a labelled red or black
   choice and reveals the card returned by the server. Retrying the same session and
   choice returns that recorded outcome, while changing the choice is rejected.

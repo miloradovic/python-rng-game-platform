@@ -20,7 +20,7 @@
     <p class="countdown" x-show="countdownLabel"><span x-text="countdownPrefix"></span> <strong x-text="countdownLabel"></strong></p>
     <button class="button button-primary game-action" type="button" x-on:click="action" x-bind:disabled="busy" x-show="canPlay" x-text="actionLabel"></button>
 
-    <section class="result-panel" x-show="isResult" aria-labelledby="spin-result-title">
+    <section class="result-panel" x-show="resultVisible" x-cloak aria-labelledby="spin-result-title">
       <p class="result-kicker">Your result</p>
       <h2 id="spin-result-title" tabindex="-1" x-text="resultLabel"></h2>
       <p x-text="rewardLabel"></p>

@@ -129,6 +129,8 @@ async def test_game_cartridges_and_embedded_leaderboards_render(application: Any
     assert "Your result" in game.text
     assert "Collect points" in game.text
     assert "Fairness details" in game.text
+    assert 'x-show="resultVisible" x-cloak' in game.text
+    assert 'x-show="isResult"' not in game.text
     assert 'id="daily-spin-segments"' in game.text
     assert '<template x-for="segment in segments"' in game.text
     assert '<svg id="daily-spin-wheel"' in game.text
@@ -216,6 +218,16 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "commitFairness" in scripts[7].text
     assert 'const gameKey = "daily_spin"' in scripts[7].text
     assert "wheel.animate(" in scripts[7].text
+    assert "pendingOutcome: null" in scripts[7].text
+    assert "pendingReward: null" in scripts[7].text
+    assert "resultVisible: false" in scripts[7].text
+    assert "get isResult()" not in scripts[7].text
+    assert "await this.wheelAnimation.finished" in scripts[7].text
+    assert "await this.settledAnimation.finished" in scripts[7].text
+    assert "new Promise((resolve) => window.setTimeout" not in scripts[7].text
+    assert "window.ArcadeProof.preferences.reducedMotion()" in scripts[7].text
+    assert "this.cancelPresentation()" in scripts[7].text
+    assert 'window.removeEventListener("arcade-proof:player"' in scripts[7].text
     assert "Spin now" in scripts[7].text
     assert "Resume spin" in scripts[7].text
     assert "String(segment.value)" in scripts[7].text
@@ -263,8 +275,24 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "submitOrRecover" in scripts[11].text
     assert "state.session?.final_score" in scripts[11].text
     assert game_page.text.index("core/final-score.js") < game_page.text.index("games/daily-spin.js")
-    daily_animation = scripts[7].text.index("await this.animateResult()")
-    assert daily_animation < scripts[7].text.index("finalScores.submitOrRecover", daily_animation)
+    daily_animation = scripts[7].text.index("await this.animateResult(")
+    daily_score = scripts[7].text.index("finalScores.submitOrRecover", daily_animation)
+    assert daily_animation < daily_score
+    action_body = (
+        scripts[7]
+        .text.split("async action()", maxsplit=1)[1]
+        .split("segmentForPendingOutcome()", maxsplit=1)[0]
+    )
+    assert "this.pendingOutcome = evaluated.outcome" in action_body
+    assert "this.outcome = evaluated.outcome" not in action_body
+    animation_method = scripts[7].text.index("async animateResult(generation)")
+    first_finish = scripts[7].text.index("await this.wheelAnimation.finished", animation_method)
+    settled_finish = scripts[7].text.index("await this.settledAnimation.finished", first_finish)
+    normal_reveal = scripts[7].text.index("this.revealPendingResult()", settled_finish)
+    assert settled_finish < normal_reveal
+    assert "this.outcome = this.pendingOutcome" in scripts[7].text
+    assert "this.targetRotation(segment, 6)" in scripts[7].text
+    assert "this.targetRotation(segment)" in scripts[7].text
     card_reveal = scripts[8].text.index("this.presentResult(true)")
     assert card_reveal < scripts[8].text.index("finalScores.submitOrRecover", card_reveal)
 
