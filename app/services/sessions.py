@@ -100,9 +100,14 @@ async def create_session(
     latest = await repositories.latest_session(session, player.id, game.id)
     if latest is not None and latest.status == SessionStatus.ACTIVE:
         raise ActiveSessionError
+    if latest is not None:
+        latest_config = await repositories.get_config_by_id(session, latest.config_version_id)
+        if latest_config is None:
+            raise NotFoundError
+        latest_payload = game_config_adapter.validate_python(latest_config.payload)
+        if latest.created_at + timedelta(seconds=latest_payload.cooldown_seconds) > now:
+            raise CooldownError
     payload = game_config_adapter.validate_python(config.payload)
-    if latest is not None and latest.created_at + timedelta(seconds=payload.cooldown_seconds) > now:
-        raise CooldownError
     duration = getattr(payload, "duration_seconds", 300)
     try:
         challenge = rules_for(game.key).definition.create_challenge()
@@ -168,10 +173,13 @@ async def retrieve_player_game_state(
         await finalize_expired_session(session, expired_session, now=now)
 
     latest = await repositories.latest_session(session, player.id, game.id)
-    payload = game_config_adapter.validate_python(config.payload)
     next_play_at = None
     if latest is not None:
-        available_at = latest.created_at + timedelta(seconds=payload.cooldown_seconds)
+        latest_config = await repositories.get_config_by_id(session, latest.config_version_id)
+        if latest_config is None:
+            raise NotFoundError
+        latest_payload = game_config_adapter.validate_python(latest_config.payload)
+        available_at = latest.created_at + timedelta(seconds=latest_payload.cooldown_seconds)
         if available_at > now:
             next_play_at = available_at
 

@@ -7,6 +7,7 @@ import pytest
 from app.models import GameConfigVersion
 from app.rng import RewardBand
 from tools import simulate
+from tools.seed import CatalogueConfig
 
 pytestmark = pytest.mark.unit
 
@@ -43,8 +44,8 @@ def test_cli_prints_machine_readable_evidence(capsys: pytest.CaptureFixture[str]
     assert report["game_key"] == "daily_spin"
     assert report["runs"] == 10
     assert report["passed"] is True
-    assert report["config_source"] == "tools.seed.CATALOGUE:daily_spin:version=1"
-    assert report["config_version"] == 1
+    assert report["config_source"] == "tools.seed.CATALOGUE:daily_spin:version=2"
+    assert report["config_version"] == 2
 
 
 def test_configuration_validation_detects_missing_daily_spin(
@@ -85,7 +86,15 @@ def test_configuration_validation_detects_malformed_daily_spin(
     monkeypatch.setattr(
         simulate,
         "CATALOGUE",
-        (("daily_spin", "Daily Spin", "Invalid", {"game_type": "daily_spin"}),),
+        (
+            CatalogueConfig(
+                game_key="daily_spin",
+                game_name="Daily Spin",
+                game_description="Invalid",
+                version=2,
+                payload={"game_type": "daily_spin"},
+            ),
+        ),
     )
 
     with pytest.raises(simulate.SimulationInputError):
@@ -99,11 +108,12 @@ def test_configuration_validation_detects_invalid_reward_mapping(
         simulate,
         "CATALOGUE",
         (
-            (
-                "daily_spin",
-                "Daily Spin",
-                "Invalid",
-                {
+            CatalogueConfig(
+                game_key="daily_spin",
+                game_name="Daily Spin",
+                game_description="Invalid",
+                version=2,
+                payload={
                     "game_type": "daily_spin",
                     "cooldown_seconds": 60,
                     "rewards": [

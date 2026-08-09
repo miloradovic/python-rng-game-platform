@@ -35,8 +35,8 @@ from tools.seed import CATALOGUE
 DEFAULT_RUNS = 100_000
 MAX_SIMULATION_RUNS = 1_000_000
 SIMULATION_VERSION = "daily-spin-distribution-simulation-v1"
-CONFIG_SOURCE = "tools.seed.CATALOGUE:daily_spin:version=1"
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
+CONFIG_SOURCE = f"tools.seed.CATALOGUE:daily_spin:version={CONFIG_VERSION}"
 SERVER_SEED_STRATEGY = "sha256('rng-game-platform-simulation-server-seed-v1\\nrun={index}')"
 CLIENT_SEED_STRATEGY = "simulation-client-{index:016x}"
 SESSION_ID_STRATEGY = "UUIDv5(URL, 'rng-game-platform-simulation-v1:{index}')"
@@ -102,11 +102,13 @@ def seeded_daily_spin_reward_bands() -> tuple[RewardBand, ...]:
 
 
 def _seeded_daily_spin_config() -> DailySpinConfig:
-    for key, _name, _description, payload in CATALOGUE:
-        if key != GameKey.DAILY_SPIN.value:
-            continue
+    entries = [entry for entry in CATALOGUE if entry.game_key == GameKey.DAILY_SPIN.value]
+    if entries:
+        entry = max(entries, key=lambda candidate: candidate.version)
+        if entry.version != CONFIG_VERSION:
+            raise SimulationInputError("the active seeded daily_spin version is unexpected")
         try:
-            config = game_config_adapter.validate_python(payload)
+            config = game_config_adapter.validate_python(entry.payload)
         except ValidationError as error:
             raise SimulationInputError("the seeded daily_spin configuration is invalid") from error
         if config.game_type != GameKey.DAILY_SPIN.value:

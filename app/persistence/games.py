@@ -24,10 +24,13 @@ async def get_game(session: AsyncSession, game_key: str) -> Game | None:
 
 async def get_active_config(session: AsyncSession, game_id: uuid.UUID) -> GameConfigVersion | None:
     config: GameConfigVersion | None = await session.scalar(
-        select(GameConfigVersion).where(
+        select(GameConfigVersion)
+        .where(
             GameConfigVersion.game_id == game_id,
             GameConfigVersion.status == ConfigStatus.PUBLISHED,
         )
+        .order_by(GameConfigVersion.version.desc())
+        .limit(1)
     )
     return config
 

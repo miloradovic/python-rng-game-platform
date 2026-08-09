@@ -125,12 +125,6 @@ class GameConfigVersion(Timestamped, Base):
             "(status = 'published' AND published_at IS NOT NULL) OR (status <> 'published')",
             name="ck_config_published_at",
         ),
-        Index(
-            "uq_game_one_published_config",
-            "game_id",
-            unique=True,
-            postgresql_where=text("status = 'published'"),
-        ),
     )
     game_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("games.id", ondelete="RESTRICT"))
     version: Mapped[int]
