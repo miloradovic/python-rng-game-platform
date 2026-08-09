@@ -10,7 +10,7 @@
     <p class="game-status" role="status" aria-live="polite" x-text="message"></p>
     <p class="countdown" x-show="countdownLabel"><span x-text="countdownPrefix"></span> <strong x-text="countdownLabel"></strong></p>
     <fieldset class="prediction-choices" x-show="canChoose">
-      <legend>What color will the server card be?</legend>
+      <legend>Pick the card color</legend>
       <template x-for="choice in choices" x-bind:key="choice.value">
         <button type="button" x-bind:class="choice.className" x-bind:data-choice="choice.value" x-on:click="choose" x-bind:disabled="busy">
           <span aria-hidden="true" x-text="choice.symbol"></span><strong x-text="choice.label"></strong>
@@ -19,10 +19,14 @@
     </fieldset>
     <button class="button button-primary" type="button" x-show="hasPendingChoice" x-on:click="resume" x-bind:disabled="busy" x-text="resumeLabel"></button>
     <section class="result-panel" x-show="isResult" aria-labelledby="prediction-result-title">
-      <p class="result-kicker">Authoritative card</p>
+      <p class="result-kicker">The card</p>
       <h2 id="prediction-result-title" tabindex="-1" x-text="resultLabel"></h2>
       <p x-text="rewardLabel"></p>
-      <button class="button button-primary" type="button" x-show="canClaim" x-on:click="claim" x-bind:disabled="busy">Claim recorded reward</button>
+      <button class="button button-primary" type="button" x-show="canClaim" x-on:click="claim" x-bind:disabled="busy">Collect points</button>
+      <details class="proof-details">
+        <summary>Fairness details</summary>
+        <p>Your choice is sent before the game returns the card. The card and points in this panel come from the recorded game result.</p>
+      </details>
     </section>
   </div>
 </section>

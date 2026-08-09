@@ -25,13 +25,18 @@
         return !this.busy && !this.pendingChoice && ["ready", "result"].includes(this.status);
       },
       get hasPendingChoice() { return Boolean(this.pendingChoice && this.session?.status === "active"); },
-      get resumeLabel() { return this.pendingChoice ? `Retry saved ${this.pendingChoice} choice` : "Retry saved choice"; },
+      get resumeLabel() { return this.pendingChoice ? `Resume ${this.pendingChoice} choice` : "Resume choice"; },
       get countdownPrefix() {
         return this.session?.status === "active" ? "Active prediction expires in" : "Next prediction in";
       },
       get canClaim() { return Boolean(this.reward && this.reward.status === "pending"); },
       get isResult() { return Boolean(this.outcome); },
-      get rewardLabel() { return this.reward ? `${this.reward.value} points · ${this.reward.status}` : ""; },
+      get rewardLabel() {
+        if (!this.reward) return "";
+        return this.reward.status === "pending"
+          ? `${this.reward.value} points ready to collect`
+          : `${this.reward.value} points collected`;
+      },
       async initialize() {
         window.addEventListener("arcade-proof:player", () => this.load());
         await this.load();
@@ -64,7 +69,7 @@
         this.countdownLabel = "";
         if (!this.player) {
           this.status = "ready";
-          this.message = "Choose a local demo player, then predict red or black.";
+          this.message = "Choose a player, then pick red or black.";
           return;
         }
         this.status = "recovering";
@@ -84,7 +89,7 @@
         if (countdownTarget) this.startCountdown(state.server_time, countdownTarget);
         if (!this.session) {
           this.status = state.next_play_at ? "cooldown" : "ready";
-          this.message = "Choose a card color. The server result is fixed only after submission.";
+          this.message = "Pick red or black to turn the card.";
           return;
         }
         this.saveJournal({
@@ -98,15 +103,15 @@
         if (this.session.status === "active") {
           this.status = "ready";
           this.message = this.pendingChoice
-            ? `Your saved ${this.pendingChoice} request is ready for an exact retry.`
-            : "Your active prediction was recovered. Choose once to finish it.";
+            ? `Your ${this.pendingChoice} choice is saved and ready to resume.`
+            : "Your unfinished round is ready. Pick a color to finish it.";
         } else if (this.session.status === "expired") {
           this.status = "expired";
           this.message = "That prediction expired before a choice reached the server.";
         } else if (this.outcome) {
           this.presentResult(false);
           this.status = state.next_play_at ? "cooldown" : "result";
-          this.message = "The authoritative card result was recovered.";
+          this.message = "Your finished card is back on screen.";
           if (!this.finalScore) {
             await window.ArcadeProof.finalScores.submitOrRecover(this, gameKey, state);
           }
@@ -184,8 +189,8 @@
           if (duration) await new Promise((resolve) => window.setTimeout(resolve, duration));
           this.status = "result";
           this.message = this.outcome.result.correct
-            ? "Correct prediction. The server awarded the configured reward."
-            : "Not correct this time. The recorded reward is zero points.";
+            ? "You called it. Your points are ready."
+            : "Not this time. Try another card when the timer ends.";
           window.setTimeout(
             () => document.getElementById("prediction-result-title")?.focus(),
             0,
@@ -210,7 +215,7 @@
         const authoritative = result.authoritative_choice;
         this.cardSymbol = authoritative === "red" ? "♦" : "♠";
         this.cardClass = `prediction-card is-revealed ${authoritative}`;
-        this.resultLabel = `${result.correct ? "Correct" : "Incorrect"}: you chose ${result.player_choice}; the server card was ${authoritative}.`;
+        this.resultLabel = `${result.correct ? "Correct" : "Not this time"}: you chose ${result.player_choice}; the card was ${authoritative}.`;
         const reduced = window.ArcadeProof.preferences.reducedMotion();
         return animate && !reduced ? 700 : 0;
       },
@@ -225,7 +230,7 @@
         try {
           this.reward = await window.ArcadeProof.api.claimSession(this.player.id, this.session.id);
           window.ArcadeProof.journal.discard(this.player.id, gameKey);
-          window.ArcadeProof.notify(`${this.reward.value} points claimed.`, this.reward.value ? "success" : "info");
+          window.ArcadeProof.notify(`${this.reward.value} points collected.`, this.reward.value ? "success" : "info");
         } catch (error) {
           this.message = error.message;
         } finally {

@@ -2,15 +2,15 @@
   <div class="game-visual spin-stage">
     <div class="wheel-pointer" aria-hidden="true"></div>
     <svg id="daily-spin-wheel" class="prize-wheel" viewBox="0 0 240 240" role="img" aria-labelledby="wheel-title wheel-description">
-      <title id="wheel-title">Weighted Daily Spin reward wheel</title>
-      <desc id="wheel-description">Segment sizes represent the active server configuration weights.</desc>
+      <title id="wheel-title">Hourly Spin point-prize wheel</title>
+      <desc id="wheel-description">A wheel showing the point prizes available in this round.</desc>
       <g id="daily-spin-segments"></g>
       <circle cx="120" cy="120" r="28"></circle>
       <text class="wheel-center" x="120" y="120" text-anchor="middle" dominant-baseline="middle">SPIN</text>
     </svg>
-    <ul class="wheel-legend" aria-label="Configured reward odds">
+    <ul class="wheel-legend" aria-label="Available point prizes">
       <template x-for="segment in segments" x-bind:key="segment.key">
-        <li><span x-text="segment.percentage"></span><strong x-text="segment.value"></strong> points</li>
+        <li><strong x-text="segment.value"></strong> points</li>
       </template>
     </ul>
   </div>
@@ -21,14 +21,14 @@
     <button class="button button-primary game-action" type="button" x-on:click="action" x-bind:disabled="busy" x-show="canPlay" x-text="actionLabel"></button>
 
     <section class="result-panel" x-show="isResult" aria-labelledby="spin-result-title">
-      <p class="result-kicker">Authoritative result</p>
+      <p class="result-kicker">Your result</p>
       <h2 id="spin-result-title" tabindex="-1" x-text="resultLabel"></h2>
       <p x-text="rewardLabel"></p>
-      <p class="verified-badge" x-show="isVerified"><span aria-hidden="true">✓</span> Independently verified on the server</p>
-      <button class="button button-primary" type="button" x-show="canClaim" x-on:click="claim" x-bind:disabled="busy">Claim points</button>
+      <p class="verified-badge" x-show="isVerified"><span aria-hidden="true">✓</span> Fair result verified</p>
+      <button class="button button-primary" type="button" x-show="canClaim" x-on:click="claim" x-bind:disabled="busy">Collect points</button>
       <details class="proof-details" x-show="hasProof">
-        <summary>View complete fairness evidence</summary>
-        <p>The commitment was published before evaluation. The revealed seed, client seed, mapping, and derived value reproduce this result.</p>
+        <summary>Fairness details</summary>
+        <p>The game committed to its seed before the spin. The revealed seed, your client seed, mapping, and derived value can reproduce this result.</p>
         <pre x-text="proofText"></pre>
       </details>
     </section>

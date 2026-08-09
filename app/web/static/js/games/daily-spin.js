@@ -36,7 +36,7 @@
       label.setAttribute("y", segment.labelY);
       label.setAttribute("text-anchor", "middle");
       label.setAttribute("dominant-baseline", "middle");
-      label.textContent = segment.percentage;
+      label.textContent = String(segment.value);
       group.append(path, label);
       return group;
     });
@@ -47,7 +47,7 @@
     return {
       busy: false,
       status: "loading",
-      message: "Loading the immutable wheel configuration…",
+      message: "Getting the wheel ready…",
       config: null,
       session: null,
       outcome: null,
@@ -71,12 +71,14 @@
         return this.session?.status === "active" ? "Active spin expires in" : "Next spin in";
       },
       get actionLabel() {
-        if (this.session?.status === "active") return "Resume secure spin";
-        return "Commit & spin";
+        if (this.session?.status === "active") return "Resume spin";
+        return "Spin now";
       },
       get rewardLabel() {
-        if (!this.reward) return "Reward pending";
-        return `${this.reward.value} points · ${this.reward.status}`;
+        if (!this.reward) return "Points are being prepared";
+        return this.reward.status === "pending"
+          ? `${this.reward.value} points ready to collect`
+          : `${this.reward.value} points collected`;
       },
       get proofText() { return this.proof ? JSON.stringify(this.proof, null, 2) : ""; },
       async initialize() {
@@ -94,7 +96,7 @@
       },
       async load() {
         this.busy = true;
-        this.message = "Loading the immutable wheel configuration…";
+        this.message = "Getting the wheel ready…";
         try {
           this.config = await window.ArcadeProof.api.getGameConfig(gameKey);
           this.buildSegments();
@@ -138,7 +140,7 @@
         this.countdownLabel = "";
         if (!this.player) {
           this.status = "ready";
-          this.message = "Choose a local demo player to spin.";
+          this.message = "Choose a player to spin the wheel.";
           return;
         }
         this.status = "recovering";
@@ -153,7 +155,7 @@
         if (countdownTarget) this.startCountdown(state.server_time, countdownTarget);
         if (!this.session) {
           this.status = state.next_play_at ? "cooldown" : "ready";
-          this.message = "The wheel is ready for a new secure commitment.";
+          this.message = "The wheel is ready. Take your spin.";
           return;
         }
         this.saveJournal({
@@ -165,13 +167,13 @@
         if (this.session.status === "active") {
           this.status = "ready";
           this.message = this.session.fairness
-            ? "Your commitment is intact. Resume with the saved client seed."
-            : "Your active spin was recovered and is ready to commit.";
+            ? "Your spin is saved and ready to resume."
+            : "Your unfinished spin is ready to resume.";
           return;
         }
         if (this.session.status === "expired") {
           this.status = "expired";
-          this.message = "This commitment expired and cannot be revealed. Its terminal evidence remains recorded.";
+          this.message = "That spin expired before it finished. Try again when the timer ends.";
           return;
         }
         if (this.outcome) {
@@ -181,7 +183,7 @@
           }
           await this.loadProof();
           this.status = state.next_play_at ? "cooldown" : "result";
-          this.message = "The authoritative result was recovered from the server.";
+          this.message = "Your finished spin is back on screen.";
           return;
         }
         this.status = state.next_play_at ? "cooldown" : "ready";
@@ -205,7 +207,7 @@
         }
         this.busy = true;
         this.status = "submitting";
-        this.message = "Creating one server-authoritative play…";
+        this.message = "Starting your spin…";
         try {
           let journal = window.ArcadeProof.journal.get(this.player.id, gameKey) || {};
           if (!this.session || this.session.status !== "active") {
@@ -231,7 +233,7 @@
           journal = window.ArcadeProof.journal.get(this.player.id, gameKey) || {};
           const seed = journal.clientSeed || clientSeed();
           this.saveJournal({ clientSeed: seed, pendingAction: "evaluate" });
-          this.message = "The server is revealing and evaluating the committed seed…";
+          this.message = "The wheel is finding your prize…";
           const evaluated = await window.ArcadeProof.api.evaluateFairness(this.player.id, proofId, seed);
           this.outcome = evaluated.outcome;
           this.reward = evaluated.reward;
@@ -241,8 +243,8 @@
           await this.loadProof();
           this.status = "result";
           this.message = this.isVerified
-            ? "Verified: the revealed seed reproduces this authoritative result."
-            : "The result is recorded, but proof verification needs attention.";
+            ? "Your result is ready and its fairness check passed."
+            : "Your result is ready. Fairness details need another check.";
         } catch (error) {
           this.status = error.code === "session_expired" ? "expired" : "recovering";
           this.message = error.message;
@@ -256,7 +258,7 @@
         const segment = this.segments.find((candidate) => candidate.key === rewardKey);
         this.resultLabel = segment
           ? `${segment.value} points from ${segment.key.replaceAll("_", " ")}`
-          : "Authoritative result recorded";
+          : "Your result is ready";
         if (!segment) return 0;
         const reduced = window.ArcadeProof.preferences.reducedMotion();
         const turns = animate && !reduced ? 5 : 0;
@@ -298,7 +300,7 @@
         try {
           this.reward = await window.ArcadeProof.api.claimSession(this.player.id, this.session.id);
           window.ArcadeProof.journal.discard(this.player.id, gameKey);
-          window.ArcadeProof.notify(`${this.reward.value} points claimed.`, "success");
+          window.ArcadeProof.notify(`${this.reward.value} points collected.`, "success");
         } catch (error) {
           this.message = error.message;
         } finally {

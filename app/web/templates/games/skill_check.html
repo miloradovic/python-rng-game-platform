@@ -1,7 +1,12 @@
 <section class="game-cartridge skill-cartridge" x-data="skillCheck" x-init="initialize" x-bind:aria-busy="busy">
   <div class="game-visual sequence-stage">
-    <p class="sequence-label" x-show="isPreview">Memorize</p>
-    <ol class="sequence-preview" x-show="isPreview" aria-label="Server-generated sequence">
+    <ol class="skill-phases" aria-label="Game progress">
+      <li x-bind:class="watchState" x-bind:aria-current="watchCurrent">Watch</li>
+      <li x-bind:class="repeatState" x-bind:aria-current="repeatCurrent">Repeat</li>
+      <li x-bind:class="scoreState" x-bind:aria-current="scoreCurrent">Score</li>
+    </ol>
+    <p class="sequence-label" x-show="isPreview">Watch</p>
+    <ol class="sequence-preview" x-show="isPreview" aria-label="Number sequence">
       <template x-for="digit in sequence" x-bind:key="digit">
         <li x-text="digit"></li>
       </template>
@@ -17,7 +22,7 @@
     <p class="countdown" x-show="countdownLabel"><span x-text="countdownPrefix"></span> <strong x-text="countdownLabel"></strong></p>
     <button class="button button-primary game-action" type="button" x-show="canStart" x-on:click="start" x-bind:disabled="busy" x-text="actionLabel"></button>
     <div class="skill-input" x-show="isInput">
-      <p>Your sequence: <strong x-text="enteredLabel" aria-live="polite"></strong></p>
+      <p>Your numbers: <strong x-text="enteredLabel" aria-live="polite"></strong></p>
       <p class="input-help">Use the digit buttons or number keys. Backspace undoes the last digit.</p>
       <div class="digit-grid" role="group" aria-label="Enter unique digits">
         <template x-for="item in digits" x-bind:key="item.digit">
@@ -26,17 +31,20 @@
       </div>
       <div class="skill-actions">
         <button class="text-button" type="button" x-on:click="undo" x-bind:disabled="undoDisabled">Undo last</button>
-        <button class="button button-primary" type="button" x-on:click="submit" x-bind:disabled="busy" x-show="canSubmit">Submit to server</button>
+        <button class="button button-primary" type="button" x-on:click="submit" x-bind:disabled="busy" x-show="canSubmit">Score my run</button>
       </div>
     </div>
     <section class="result-panel" x-show="isResult" aria-labelledby="skill-result-title">
-      <p class="result-kicker">Authoritative score</p>
+      <p class="result-kicker">Your score</p>
       <h2 id="skill-result-title" tabindex="-1" x-text="scoreLabel"></h2>
       <p x-text="accuracyLabel"></p>
-      <p>The score uses the correct prefix only. Local timing does not increase or reduce it.</p>
       <p x-text="rewardLabel"></p>
-      <p class="verified-badge" x-show="finalScore"><span aria-hidden="true">✓</span> Submitted idempotently to the weekly board</p>
-      <button class="button button-primary" type="button" x-show="canClaim" x-on:click="claim" x-bind:disabled="busy">Claim score reward</button>
+      <p class="verified-badge" x-show="finalScore"><span aria-hidden="true">✓</span> Added to this week’s board</p>
+      <button class="button button-primary" type="button" x-show="canClaim" x-on:click="claim" x-bind:disabled="busy">Collect points</button>
+      <details class="proof-details">
+        <summary>How scoring works</summary>
+        <p>Your score counts the correct numbers from the start of the sequence. Input speed does not change it, and retrying cannot add a second score.</p>
+      </details>
     </section>
   </div>
 </section>

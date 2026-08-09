@@ -3,7 +3,7 @@
 (() => {
   const messages = Object.freeze({
     active_session_exists: "An active play already exists. Refreshing its server state is safest.",
-    cooldown_active: "This game is still cooling down. Refresh to get the authoritative ready time.",
+    cooldown_active: "This game is recharging. The timer shows when you can play again.",
     forbidden: "This play belongs to a different local demo player.",
     idempotency_conflict: "This saved operation no longer matches the original request.",
     invalid_transition: "That play has already moved to another server state. Recovering its record is safest.",

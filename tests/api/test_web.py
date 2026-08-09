@@ -124,7 +124,11 @@ async def test_game_cartridges_and_embedded_leaderboards_render(application: Any
 
     assert game.status_code == 200
     assert 'x-data="dailySpin"' in game.text
-    assert "Weighted Daily Spin reward wheel" in game.text
+    assert "Hourly Spin point-prize wheel" in game.text
+    assert "Available point prizes" in game.text
+    assert "Your result" in game.text
+    assert "Collect points" in game.text
+    assert "Fairness details" in game.text
     assert 'id="daily-spin-segments"' in game.text
     assert '<template x-for="segment in segments"' in game.text
     assert '<svg id="daily-spin-wheel"' in game.text
@@ -135,9 +139,16 @@ async def test_game_cartridges_and_embedded_leaderboards_render(application: Any
     assert "x-bind:style" not in game.text
     assert "style=" not in game.text
     assert 'x-data="predictionCard"' in prediction.text
-    assert "What color will the server card be?" in prediction.text
+    assert "Pick the card color" in prediction.text
+    assert "The card" in prediction.text
+    assert "Your choice is sent before the game returns the card" in prediction.text
     assert 'x-data="skillCheck"' in skill.text
-    assert "Local timing does not increase or reduce it" in skill.text
+    assert "Watch" in skill.text
+    assert "Repeat" in skill.text
+    assert "Score" in skill.text
+    assert "Score my run" in skill.text
+    assert "How scoring works" in skill.text
+    assert "Input speed does not change it" in skill.text
     for response, game_key, component_name in (
         (game, "daily_spin", "dailySpin"),
         (prediction, "prediction_card", "predictionCard"),
@@ -151,6 +162,9 @@ async def test_game_cartridges_and_embedded_leaderboards_render(application: Any
         assert response.text.index(f'x-data="{component_name}"') < response.text.index(
             'id="live-leaderboard"'
         )
+        assert 'class="game-page-header"' in response.text
+        assert 'class="cadence-chip"' in response.text
+        assert "> All games</a>" in response.text
         assert 'aria-label="Top 10 weekly scores"' in response.text
         assert 'aria-live="polite" aria-atomic="true"' in response.text
         assert "Choose a player to join the chase" in response.text
@@ -159,7 +173,7 @@ async def test_game_cartridges_and_embedded_leaderboards_render(application: Any
     assert leaderboard.text.count('id="live-leaderboard"') == 1
     assert 'x-data="leaderboard"' in leaderboard.text
     assert 'data-game-key="skill_check"' in leaderboard.text
-    assert "Weekly top 10" in leaderboard.text
+    assert "Top scores this week" in leaderboard.text
     assert missing.status_code == 404
 
 
@@ -202,11 +216,18 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "commitFairness" in scripts[7].text
     assert 'const gameKey = "daily_spin"' in scripts[7].text
     assert "wheel.animate(" in scripts[7].text
+    assert "Spin now" in scripts[7].text
+    assert "Resume spin" in scripts[7].text
+    assert "String(segment.value)" in scripts[7].text
+    assert "Commit & spin" not in scripts[7].text
+    assert "server-authoritative" not in scripts[7].text
     assert 'document.createElementNS(svgNamespace, "g")' in scripts[7].text
     assert "container.replaceChildren(...groups)" in scripts[7].text
     assert "renderWheelSegments(this.segments)" in scripts[7].text
     assert "wheelStyle" not in scripts[7].text
     assert "authoritative_choice" in scripts[8].text
+    assert "the card was" in scripts[8].text
+    assert "points collected" in scripts[8].text
     assert '["create_session", "play"]' in scripts[8].text
     assert "await this.recover();" in scripts[8].text
     assert 'error.code === "invalid_transition"' in scripts[8].text
@@ -214,6 +235,10 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert scripts[8].text.count("if (this.busy) return;") >= 2
     assert "submitFinalScore" in scripts[9].text
     assert "lockedSubmission" in scripts[9].text
+    assert "watchState" in scripts[9].text
+    assert "repeatState" in scripts[9].text
+    assert "scoreState" in scripts[9].text
+    assert "Score returned by the server" not in scripts[9].text
     assert "getPlayerRank" in scripts[6].text
     assert "pageSize = 10" in scripts[6].text
     assert "playerStore.validateCurrent()" in scripts[6].text

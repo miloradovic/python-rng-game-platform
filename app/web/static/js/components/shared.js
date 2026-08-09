@@ -148,7 +148,7 @@
     return {
       gameKey: "",
       state: null,
-      message: "Choose a local demo player to check recovery state.",
+      message: "Choose a player to check your saved round.",
       busy: false,
       countdownLabel: "",
       timer: null,
@@ -190,17 +190,17 @@
         const player = this.player;
         if (!player) {
           this.state = null;
-          this.message = "Choose a local demo player to check recovery state.";
+          this.message = "Choose a player to check your saved round.";
           return;
         }
         this.busy = true;
-        this.message = "Checking the authoritative server record…";
+        this.message = "Checking your latest round…";
         try {
           this.state = await window.ArcadeProof.api.getGameState(player.id, this.gameKey);
           if (!this.state.session) this.message = "No previous play is recorded for this game.";
-          else if (this.state.session.status === "active") this.message = "An active play can be resumed by the game cartridge or safely cancelled.";
+          else if (this.state.session.status === "active") this.message = "Your unfinished round can be resumed here or cancelled.";
           else if (this.state.session.status === "expired") this.message = "The latest play expired before completion. Start again when available.";
-          else this.message = "The latest durable result was recovered from the server.";
+          else this.message = "Your latest result is ready again.";
           this.updateCountdown();
         } catch (error) {
           this.message = error.message;
@@ -214,7 +214,7 @@
         try {
           await window.ArcadeProof.api.cancelSession(this.player.id, this.state.session.id);
           window.ArcadeProof.journal.discard(this.player.id, this.gameKey);
-          notify("Active play cancelled. Its durable evidence remains recorded.", "success");
+          notify("Round cancelled. Its fairness record is still available.", "success");
           await this.recover();
         } catch (error) {
           this.message = error.message;
@@ -225,7 +225,7 @@
       discardJournal() {
         if (!this.player) return;
         window.ArcadeProof.journal.discard(this.player.id, this.gameKey);
-        notify("Saved browser operation discarded. Server records were not changed.", "info");
+        notify("Saved browser step cleared. Your finished results were not changed.", "info");
       },
     };
   }

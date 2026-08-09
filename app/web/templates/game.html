@@ -4,11 +4,13 @@
 
 {% block content %}
   <section class="stage-shell shell game-stage-{{ game.accent }}" aria-labelledby="game-title">
-    <a class="back-link" href="{{ url_for('lobby') }}"><span aria-hidden="true">←</span> Back to lobby</a>
-    <header class="cartridge-heading">
-      <p class="eyebrow"><span></span> {{ game.eyebrow }}</p>
-      <h1 id="game-title">{{ game.name }}</h1>
-      <p>{{ game.description }}</p>
+    <header class="game-page-header">
+      <div>
+        <a class="back-link" href="{{ url_for('lobby') }}#games"><span aria-hidden="true">←</span> All games</a>
+        <h1 id="game-title">{{ game.name }}</h1>
+        <p class="game-instruction">{{ game.description }}</p>
+      </div>
+      <span class="cadence-chip"><span aria-hidden="true"></span>{{ game.cadence }}</span>
     </header>
 
     <div class="game-play-layout">
