@@ -236,6 +236,7 @@ def test_domain_router_is_composition_only_and_registers_every_public_route() ->
         ("POST", "/leaderboards/{game_key}/settle"),
         ("POST", "/scores"),
         ("GET", "/leaderboards/{game_key}"),
+        ("GET", "/leaderboards/{game_key}/events"),
         ("GET", "/players/{player_id}/rank"),
         ("POST", "/fairness/commit"),
         ("POST", "/fairness/evaluate"),

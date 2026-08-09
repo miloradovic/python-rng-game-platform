@@ -159,6 +159,11 @@
       return this.request(`/players/${encodeURIComponent(playerId)}/rank?${query}`, { playerId });
     }
 
+    leaderboardEventsUrl(gameKey, periodStart) {
+      const query = new URLSearchParams({ period_start: periodStart });
+      return `${this.baseUrl}/leaderboards/${encodeURIComponent(gameKey)}/events?${query}`;
+    }
+
     cancelSession(playerId, sessionId) {
       return this.request(`/sessions/${encodeURIComponent(sessionId)}`, {
         method: "DELETE",

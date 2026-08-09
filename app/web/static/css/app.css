@@ -762,6 +762,24 @@
     margin-top: var(--space-3);
   }
 
+  .leaderboard-live-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-top: var(--space-3);
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 800;
+  }
+
+  .leaderboard-live-state > span:first-child {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 0 0.2rem rgb(103 241 207 / 12%);
+  }
+
   .period-card,
   .personal-rank,
   .scoreboard,

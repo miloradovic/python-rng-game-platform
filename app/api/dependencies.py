@@ -8,6 +8,7 @@ from fastapi import Depends, Header, Request
 from redis.asyncio import Redis
 
 from app.config import Settings
+from app.leaderboard_events import LeaderboardEventHub
 from app.leaderboard_projection import LeaderboardProjectionReader
 from app.observability import MetricsRegistry
 from app.rng import OutcomeProvider
@@ -39,6 +40,13 @@ def get_metrics(request: Request) -> MetricsRegistry:
 
     metrics: MetricsRegistry = request.app.state.metrics
     return metrics
+
+
+def get_leaderboard_event_hub(request: Request) -> LeaderboardEventHub:
+    """Return the application-owned disposable leaderboard signal hub."""
+
+    hub: LeaderboardEventHub = request.app.state.leaderboard_events
+    return hub
 
 
 def get_projection_reader(

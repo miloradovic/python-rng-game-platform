@@ -174,7 +174,12 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "getPlayerRank" in scripts[6].text
     assert "topEntries" in scripts[6].text
     assert "playerStore.validateCurrent()" in scripts[6].text
-    assert "if (this.initialized) this.load();" in scripts[6].text
+    assert "if (this.initialized) this.scheduleRefresh();" in scripts[6].text
+    assert "new EventSource(" in scripts[6].text
+    assert 'addEventListener("leaderboard-change"' in scripts[6].text
+    assert "pollIntervalMs = 15000" in scripts[6].text
+    assert "visibilitychange" in scripts[6].text
+    assert "requestGeneration" in scripts[6].text
     assert "validationPromise" in scripts[2].text
     assert "arcade-proof.preferences.v1" in scripts[10].text
     assert "sound: false" in scripts[10].text

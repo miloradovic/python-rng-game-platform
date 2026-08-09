@@ -1,15 +1,22 @@
 """Leaderboard, score, rank, and settlement HTTP adapters."""
 
+import asyncio
+import json
+from collections.abc import AsyncIterator
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
     authorize_settlement,
+    get_leaderboard_event_hub,
     get_metrics,
     get_player_id,
     get_projection_reader,
@@ -17,6 +24,8 @@ from app.api.dependencies import (
 )
 from app.cache import project_final_score
 from app.database import get_session as get_database_session
+from app.game_rules import InvalidRulesInputError, leaderboard_rules_for
+from app.leaderboard_events import LeaderboardChange, LeaderboardEventHub
 from app.leaderboard_projection import LeaderboardProjectionReader
 from app.observability import MetricsRegistry
 from app.schemas import (
@@ -37,6 +46,9 @@ ProjectionReader = Annotated[LeaderboardProjectionReader, Depends(get_projection
 RedisClient = Annotated[Redis | None, Depends(get_redis)]
 SettlementAuthorized = Annotated[bool, Depends(authorize_settlement)]
 Metrics = Annotated[MetricsRegistry, Depends(get_metrics)]
+EventHub = Annotated[LeaderboardEventHub, Depends(get_leaderboard_event_hub)]
+
+_HEARTBEAT_SECONDS = 15.0
 
 
 def _period_start(value: datetime) -> datetime:
@@ -46,6 +58,75 @@ def _period_start(value: datetime) -> datetime:
     if value.weekday() != 0 or any((value.hour, value.minute, value.second, value.microsecond)):
         raise service_errors.InvalidPlayError
     return value
+
+
+def _leaderboard_game_key(value: str) -> str:
+    try:
+        leaderboard_rules_for(value)
+    except InvalidRulesInputError as error:
+        raise service_errors.LeaderboardGameIneligibleError from error
+    return value
+
+
+def _event_payload(event: LeaderboardChange) -> bytes:
+    data = json.dumps(
+        {
+            "game_key": event.game_key,
+            "period_start": event.period_start.isoformat(),
+        },
+        separators=(",", ":"),
+    )
+    return f"event: leaderboard-change\ndata: {data}\n\n".encode()
+
+
+async def _leaderboard_event_stream(
+    request: Request,
+    hub: LeaderboardEventHub,
+    *,
+    game_key: str,
+    period_start: datetime,
+) -> AsyncIterator[bytes]:
+    subscription = await hub.subscribe(game_key=game_key, period_start=period_start)
+    try:
+        yield b": connected\n\n"
+        while not await request.is_disconnected():
+            try:
+                event = await asyncio.wait_for(subscription.receive(), timeout=_HEARTBEAT_SECONDS)
+            except TimeoutError:
+                yield b": heartbeat\n\n"
+                continue
+            if event is None:
+                return
+            yield _event_payload(event)
+    finally:
+        await subscription.close()
+
+
+@router.get(
+    "/leaderboards/{game_key}/events",
+    response_class=StreamingResponse,
+    description=(
+        "Open a same-origin stream of privacy-safe leaderboard invalidations. Events "
+        "contain only the game key and canonical UTC-week start; clients refetch the "
+        "authorized leaderboard and rank after each signal."
+    ),
+)
+async def leaderboard_events(
+    game_key: str,
+    request: Request,
+    hub: EventHub,
+    period_start: Annotated[datetime, Query()],
+) -> StreamingResponse:
+    start = _period_start(period_start)
+    key = _leaderboard_game_key(game_key)
+    return StreamingResponse(
+        _leaderboard_event_stream(request, hub, game_key=key, period_start=start),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post(
@@ -104,6 +185,7 @@ async def submit_score(
     redis: RedisClient,
     response: Response,
     owner_id: OwnerId,
+    hub: EventHub,
 ) -> FinalScoreResponse:
     score, created, game_key = await leaderboard_services.submit_final_score(
         session, session_id=body.session_id, owner_id=owner_id
@@ -111,7 +193,9 @@ async def submit_score(
     if not created:
         response.status_code = status.HTTP_200_OK
     else:
-        await project_final_score(redis, score, game_key)
+        await hub.publish(LeaderboardChange(game_key=game_key, period_start=score.period_start))
+        with suppress(RedisError):
+            await project_final_score(redis, score, game_key)
     return FinalScoreResponse.model_validate(score)
 
 

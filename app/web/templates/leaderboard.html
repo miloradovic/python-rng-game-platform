@@ -8,6 +8,7 @@
     aria-labelledby="leaderboard-title"
     x-data="leaderboard"
     x-init="init"
+    data-game-key="skill_check"
     data-period-start="{{ period_start.isoformat() }}"
   >
     <header class="leaderboard-hero">
@@ -15,6 +16,10 @@
         <p class="eyebrow"><span></span> Skill Check · weekly scoreboard</p>
         <h1 id="leaderboard-title">The week’s sharpest recall.</h1>
         <p class="stage-lede">Every completed score entry keeps its canonical place. One player may appear more than once.</p>
+        <p class="leaderboard-live-state" role="status" aria-live="polite">
+          <span aria-hidden="true"></span>
+          <span x-text="liveStatus === 'reconnecting' ? 'Reconnecting' : liveStatus === 'updated' ? 'Updated' : 'Live'"></span>
+        </p>
       </div>
       <dl class="period-card" aria-label="Leaderboard period">
         <div><dt>UTC week</dt><dd>{{ period_start.strftime('%d %b') }}–{{ period_end.strftime('%d %b %Y') }}</dd></div>

@@ -14,6 +14,7 @@ It has no payments, cash value, wagering, KYC, or claim of regulatory compliance
 - Atomic session expiration that terminally expires committed fairness proofs,
   appends their hash-chained terminal event, and removes unrevealed seed custody.
 - PostgreSQL as the durable authority; Redis only as a rebuildable leaderboard projection.
+- Privacy-safe live leaderboard invalidations with PostgreSQL fallback recovery.
 - Idempotent reward claims, score submissions, and unique-player closed-period settlement.
 
 The seeded games are `daily_spin`, `prediction_card`, and `skill_check`. All three
@@ -98,6 +99,8 @@ when you intentionally want to remove both development and test container data.
   server-timestamped session, outcome, reward, fairness, score, and cooldown recovery.
 - `POST /api/v1/fairness/commit` and `/fairness/evaluate`; retrieve or verify a proof by outcome.
 - `POST /api/v1/scores`; read leaderboard and authenticated player rank.
+- `GET /api/v1/leaderboards/{game_key}/events?period_start=...` for same-origin
+  `leaderboard-change` invalidations containing only the game and UTC-week coordinates.
 - `POST /api/v1/leaderboards/{game_key}/settle` for an authorized, closed ISO week.
 
 The player-facing leaderboard is score-entry-based, so one generated public label
@@ -112,3 +115,10 @@ recipient retains the exact source score that established their rank.
 
 All player-owned operations use the demo `X-Player-ID` boundary. Settlement additionally
 requires `X-Settlement-Token`. These are local demo controls, not production authentication.
+
+Live invalidation uses a bounded in-process broadcaster and is intentionally disposable:
+browsers refetch authorized PostgreSQL-backed state after a signal, on reconnect/focus,
+and every 15 seconds. This matches the current single-process deployment. A future
+multi-worker deployment must fan the same event contract out through PostgreSQL
+`LISTEN/NOTIFY` or Redis Pub/Sub; neither transport would replace PostgreSQL as the
+leaderboard authority.

@@ -13,6 +13,7 @@ from app.api.router import router as api_router
 from app.cache import create_redis_client, redis_is_available
 from app.config import Settings, get_settings
 from app.database import Database
+from app.leaderboard_events import LeaderboardEventHub
 from app.logging import configure_logging
 from app.observability import MetricsRegistry, install_observability
 from app.rng import HmacOutcomeProvider
@@ -68,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            await application.state.leaderboard_events.shutdown()
             if redis_client is not None:
                 await redis_client.aclose()
             await database.dispose()
@@ -81,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     application.state.settings = resolved_settings
     application.state.metrics = metrics
+    application.state.leaderboard_events = LeaderboardEventHub()
     application.state.redis = None
     application.state.outcome_provider = HmacOutcomeProvider(
         resolved_settings.outcome_hmac_secret.get_secret_value()
