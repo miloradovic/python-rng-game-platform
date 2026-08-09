@@ -22,7 +22,6 @@ REQUIRED_WEB_ASSETS = (
     Path("templates/base.html"),
     Path("templates/lobby.html"),
     Path("templates/game.html"),
-    Path("templates/leaderboard.html"),
     Path("templates/components/game_card.html"),
     Path("templates/components/live_leaderboard.html"),
     Path("templates/components/shared_feedback.html"),
@@ -147,23 +146,6 @@ async def game_page(game_key: str, request: Request, session: Session) -> HTMLRe
             page="game",
             game=game,
             game_key=game.key,
-            period_start=period_start,
-            period_end=period_end,
-        ),
-    )
-
-
-@router.get("/leaderboard", response_class=HTMLResponse, name="leaderboard_page")
-async def leaderboard_page(request: Request) -> HTMLResponse:
-    """Render the current server-defined UTC leaderboard period."""
-
-    period_start, period_end = leaderboard_period(datetime.now(UTC))
-    return templates.TemplateResponse(
-        request=request,
-        name="leaderboard.html",
-        context=_context(
-            request,
-            page="leaderboard",
             period_start=period_start,
             period_end=period_end,
         ),

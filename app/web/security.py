@@ -24,7 +24,7 @@ _CONTENT_SECURITY_POLICY = "; ".join(
 
 
 def _is_player_surface(path: str) -> bool:
-    return path == "/" or path == "/leaderboard" or path.startswith(("/games/", "/static/"))
+    return path == "/" or path.startswith(("/games/", "/static/"))
 
 
 def _is_api_surface(path: str) -> bool:

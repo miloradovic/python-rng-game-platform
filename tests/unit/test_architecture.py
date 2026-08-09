@@ -255,7 +255,6 @@ def test_web_adapter_has_only_page_routes_and_no_reverse_dependencies() -> None:
     assert registered == {
         ("GET", "/"),
         ("GET", "/games/{game_key}"),
-        ("GET", "/leaderboard"),
     }
 
     for path in (APP_ROOT / "web").glob("*.py"):

@@ -112,14 +112,13 @@ async def test_lobby_renders_catalogue_with_strict_browser_headers(application: 
     assert "sha384-MKLWq9B+" in response.text
 
 
-async def test_game_cartridges_and_embedded_leaderboards_render(application: Any) -> None:
+async def test_game_cartridges_and_embedded_boards_render(application: Any) -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application), base_url="http://test"
     ) as client:
         game = await client.get("/games/daily_spin")
         prediction = await client.get("/games/prediction_card")
         skill = await client.get("/games/skill_check")
-        leaderboard = await client.get("/leaderboard")
         missing = await client.get("/games/unknown")
 
     assert game.status_code == 200
@@ -171,11 +170,6 @@ async def test_game_cartridges_and_embedded_leaderboards_render(application: Any
         assert 'aria-live="polite" aria-atomic="true"' in response.text
         assert "Choose a player to join the chase" in response.text
         assert "Be first on the board" in response.text
-    assert leaderboard.status_code == 200
-    assert leaderboard.text.count('id="live-leaderboard"') == 1
-    assert 'x-data="leaderboard"' in leaderboard.text
-    assert 'data-game-key="skill_check"' in leaderboard.text
-    assert "Top scores this week" in leaderboard.text
     assert missing.status_code == 404
 
 
@@ -268,6 +262,7 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "describeChange" in scripts[6].text
     assert "startCurrentPeriod" in scripts[6].text
     assert "nextPage" not in scripts[6].text
+    assert '"skill_check"' not in scripts[6].text
     assert "validationPromise" in scripts[2].text
     assert "arcade-proof.preferences.v1" in scripts[10].text
     assert "sound: false" in scripts[10].text
