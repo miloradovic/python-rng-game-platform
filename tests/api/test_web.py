@@ -87,7 +87,7 @@ async def test_lobby_renders_catalogue_with_strict_browser_headers(application: 
     assert "sha384-MKLWq9B+" in response.text
 
 
-async def test_game_cartridges_and_leaderboard_render(application: Any) -> None:
+async def test_game_cartridges_and_embedded_leaderboards_render(application: Any) -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application), base_url="http://test"
     ) as client:
@@ -113,10 +113,28 @@ async def test_game_cartridges_and_leaderboard_render(application: Any) -> None:
     assert "What color will the server card be?" in prediction.text
     assert 'x-data="skillCheck"' in skill.text
     assert "Local timing does not increase or reduce it" in skill.text
+    for response, game_key, component_name in (
+        (game, "daily_spin", "dailySpin"),
+        (prediction, "prediction_card", "predictionCard"),
+        (skill, "skill_check", "skillCheck"),
+    ):
+        assert response.text.count('id="live-leaderboard"') == 1
+        assert response.text.count('x-data="leaderboard"') == 1
+        assert f'data-game-key="{game_key}"' in response.text
+        assert 'data-period-start="' in response.text
+        assert 'data-period-end="' in response.text
+        assert response.text.index(f'x-data="{component_name}"') < response.text.index(
+            'id="live-leaderboard"'
+        )
+        assert 'aria-label="Top 10 weekly scores"' in response.text
+        assert 'aria-live="polite" aria-atomic="true"' in response.text
+        assert "Choose a player to join the chase" in response.text
+        assert "Be first on the board" in response.text
     assert leaderboard.status_code == 200
+    assert leaderboard.text.count('id="live-leaderboard"') == 1
     assert 'x-data="leaderboard"' in leaderboard.text
-    assert "One player may appear more than once" in leaderboard.text
-    assert "PostgreSQL is authoritative" in leaderboard.text
+    assert 'data-game-key="skill_check"' in leaderboard.text
+    assert "Weekly top 10" in leaderboard.text
     assert missing.status_code == 404
 
 
@@ -172,7 +190,7 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "submitFinalScore" in scripts[9].text
     assert "lockedSubmission" in scripts[9].text
     assert "getPlayerRank" in scripts[6].text
-    assert "topEntries" in scripts[6].text
+    assert "pageSize = 10" in scripts[6].text
     assert "playerStore.validateCurrent()" in scripts[6].text
     assert "if (this.initialized) this.scheduleRefresh();" in scripts[6].text
     assert "new EventSource(" in scripts[6].text
@@ -180,6 +198,14 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "pollIntervalMs = 15000" in scripts[6].text
     assert "visibilitychange" in scripts[6].text
     assert "requestGeneration" in scripts[6].text
+    assert "snapshotRowPositions" in scripts[6].text
+    assert "getBoundingClientRect()" in scripts[6].text
+    assert "animateChanges" in scripts[6].text
+    assert "row.animate(" in scripts[6].text
+    assert "preferences.reducedMotion()" in scripts[6].text
+    assert "describeChange" in scripts[6].text
+    assert "startCurrentPeriod" in scripts[6].text
+    assert "nextPage" not in scripts[6].text
     assert "validationPromise" in scripts[2].text
     assert "arcade-proof.preferences.v1" in scripts[10].text
     assert "sound: false" in scripts[10].text

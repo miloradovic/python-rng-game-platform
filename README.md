@@ -39,9 +39,12 @@ header, then use the lobby to play each real server flow:
 - Skill Check previews the server-generated unique-digit sequence, accepts keyboard
   or touch input, and submits those actions for the authoritative correct-prefix score.
   It then submits that returned score idempotently and claims the matching reward.
-- The weekly Skill Check scoreboard presents the top three, paginated canonical
-  score entries, and the current player's best rank. Generated `Player-…` labels
-  keep player-entered display names and player UUIDs out of leaderboard entries.
+- Every game page embeds its live UTC-week leaderboard beside the game on wide
+  screens and directly below it on narrow screens. Each panel shows the top 10,
+  the current player's best rank, and a reset countdown without pagination.
+  Rank changes use short, optional motion plus a polite text announcement;
+  generated `Player-…` labels keep player-entered display names and player UUIDs
+  out of leaderboard entries.
 
 Browser timers and animations are presentation only. Server timestamps enforce
 expiry and cooldown, and browser refresh recovery reads durable state from PostgreSQL.

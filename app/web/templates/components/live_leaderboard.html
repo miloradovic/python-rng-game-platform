@@ -1,0 +1,81 @@
+<aside
+  id="live-leaderboard"
+  class="live-leaderboard"
+  aria-labelledby="live-leaderboard-title"
+  x-data="leaderboard"
+  x-init="init"
+  data-game-key="{{ game_key }}"
+  data-period-start="{{ period_start.isoformat() }}"
+  data-period-end="{{ period_end.isoformat() }}"
+>
+  <header class="live-leaderboard-header">
+    <div>
+      <p class="eyebrow"><span></span> Live leaderboard</p>
+      <h2 id="live-leaderboard-title">Weekly top 10</h2>
+    </div>
+    <p class="leaderboard-live-state" role="status" x-bind:data-state="liveStatus">
+      <span aria-hidden="true"></span>
+      <span x-text="liveStatusLabel"></span>
+    </p>
+  </header>
+
+  <div class="leaderboard-period" aria-label="Leaderboard period">
+    <p><span>UTC week</span> <strong x-text="weekLabel">{{ period_start.strftime('%d %b') }}–{{ period_end.strftime('%d %b %Y') }}</strong></p>
+    <p><span>Resets in</span> <strong x-text="periodCountdown">Calculating…</strong></p>
+  </div>
+
+  <p class="sr-only" aria-live="polite" aria-atomic="true" x-text="announcement"></p>
+
+  <div class="leaderboard-identity" x-show="!hasPlayer">
+    <div>
+      <strong>Choose a player to join the chase.</strong>
+      <p>Your local player unlocks the weekly board and marks your best score.</p>
+    </div>
+    <button class="button button-secondary" type="button" x-on:click="openIdentity">Choose player</button>
+  </div>
+
+  <p class="leaderboard-loading" x-show="hasPlayer && loading && !hasLoaded" role="status">Loading this week’s scores…</p>
+
+  <div class="status-panel status-error leaderboard-error" x-show="hasPlayer && error" role="alert">
+    <p x-text="error"></p>
+    <button class="button button-secondary" type="button" x-on:click="load">Try again</button>
+  </div>
+
+  <div x-show="hasPlayer && hasLoaded && !error">
+    <section class="leaderboard-personal" aria-labelledby="personal-rank-title">
+      <h3 class="sr-only" id="personal-rank-title">Your best weekly score</h3>
+      <div>
+        <p>Your best</p>
+        <strong x-show="personalEntry">
+          <span x-text="personalLabel"></span>
+          <small>You</small>
+        </strong>
+        <strong x-show="!personalEntry">No score yet</strong>
+      </div>
+      <p x-show="personalEntry"><b>#<span x-text="personalRank"></span></b> · <span x-text="personalScore"></span> pts</p>
+    </section>
+
+    <ol class="live-rank-list" x-show="items.length" aria-label="Top 10 weekly scores">
+      <template x-for="entry in items" x-bind:key="entry.score_id">
+        <li
+          data-leaderboard-row
+          x-bind:data-score-id="entry.score_id"
+          x-bind:class="entry.is_current_player ? 'is-current' : ''"
+        >
+          <span class="live-rank-number">#<span x-text="entry.rank"></span></span>
+          <span class="live-rank-player">
+            <strong x-text="entry.public_label"></strong>
+            <small x-show="entry.is_current_player">You</small>
+          </span>
+          <b data-leaderboard-score><span x-text="entry.final_score"></span> <span>pts</span></b>
+        </li>
+      </template>
+    </ol>
+
+    <div class="live-leaderboard-empty" x-show="items.length === 0" role="status">
+      <span aria-hidden="true">◇</span>
+      <strong>Be first on the board.</strong>
+      <p>Finish a round to set this week’s opening score.</p>
+    </div>
+  </div>
+</aside>

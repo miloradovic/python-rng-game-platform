@@ -24,6 +24,7 @@ REQUIRED_WEB_ASSETS = (
     Path("templates/game.html"),
     Path("templates/leaderboard.html"),
     Path("templates/components/game_card.html"),
+    Path("templates/components/live_leaderboard.html"),
     Path("templates/components/shared_feedback.html"),
     Path("templates/games/daily_spin.html"),
     Path("templates/games/prediction_card.html"),
@@ -117,10 +118,18 @@ async def game_page(game_key: str, request: Request, session: Session) -> HTMLRe
     game = next((candidate for candidate in games if candidate.key == game_key), None)
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found")
+    period_start, period_end = leaderboard_period(datetime.now(UTC))
     return templates.TemplateResponse(
         request=request,
         name="game.html",
-        context=_context(request, page="game", game=game),
+        context=_context(
+            request,
+            page="game",
+            game=game,
+            game_key=game.key,
+            period_start=period_start,
+            period_end=period_end,
+        ),
     )
 
 

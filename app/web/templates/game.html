@@ -11,12 +11,17 @@
       <p>{{ game.description }}</p>
     </header>
 
-    {% if game.key == "daily_spin" %}
-      {% include "games/daily_spin.html" %}
-    {% elif game.key == "prediction_card" %}
-      {% include "games/prediction_card.html" %}
-    {% elif game.key == "skill_check" %}
-      {% include "games/skill_check.html" %}
-    {% endif %}
+    <div class="game-play-layout">
+      <div class="game-play-column">
+        {% if game.key == "daily_spin" %}
+          {% include "games/daily_spin.html" %}
+        {% elif game.key == "prediction_card" %}
+          {% include "games/prediction_card.html" %}
+        {% elif game.key == "skill_check" %}
+          {% include "games/skill_check.html" %}
+        {% endif %}
+      </div>
+      {% include "components/live_leaderboard.html" %}
+    </div>
   </section>
 {% endblock %}
