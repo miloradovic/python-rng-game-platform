@@ -132,6 +132,14 @@ async def list_games(
     )
 
 
-@router.get("/games/{game_key}/config", response_model=GameConfigResponse)
+@router.get(
+    "/games/{game_key}/config",
+    response_model=GameConfigResponse,
+    description=(
+        "Return the highest-version published configuration for an active game. "
+        "Published versions are immutable, and sessions remain pinned to the exact "
+        "version selected when they were created."
+    ),
+)
 async def get_active_config(game_key: str, session: Session) -> GameConfigResponse:
     return GameConfigResponse.model_validate(await player_services.active_config(session, game_key))

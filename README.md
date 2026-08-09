@@ -1,133 +1,105 @@
-# Python RNG Game Platform
+# Play Fast. Climb Faster.
 
-A server-authoritative Python/FastAPI demo platform for free-to-play
-games. It is a portfolio project focused on correctness: deterministic game rules,
-provably fair RNG, idempotent rewards, and durable audit evidence.
+**A server-authoritative competitive gaming platform built with Python and FastAPI.**
 
-It has no payments, cash value, wagering, KYC, or claim of regulatory compliance.
+Three quick-play games feed one live competitive loop: play, score, watch the
+leaderboard move, and come back to take the lead. The experience is designed to
+feel immediate and social while the backend protects every outcome, score, and
+reward.
 
-## What it demonstrates
+This is a free-to-play portfolio project. It has no payments, wagering, cash
+value, KYC, or claim of regulatory compliance.
 
-- Server-owned game outcomes, scores, rewards, timestamps, and session lifecycle.
-- Immutable game configuration versions and append-only audit/analytics evidence.
-- Provably fair `daily_spin` commitment/reveal using HMAC-SHA256.
-- Atomic session expiration that terminally expires committed fairness proofs,
-  appends their hash-chained terminal event, and removes unrevealed seed custody.
-- PostgreSQL as the durable authority; Redis only as a rebuildable leaderboard projection.
-- Privacy-safe live leaderboard invalidations with PostgreSQL fallback recovery.
-- Idempotent reward claims, score submissions, and unique-player closed-period settlement.
+## The player experience
 
-The seeded games are `daily_spin`, `prediction_card`, and `skill_check`. All three
-produce server-derived leaderboard scores: the configured spin reward value, 25
-points for a correct prediction (otherwise zero), and the Skill Check score from
-0 to 1,000.
+The compact lobby puts games first. Each title has a short replay cadence, a
+clear score, and a live weekly leaderboard embedded beside the action—never
+hidden on a separate page.
 
-## Player frontend
+| Game | Player loop | Competitive score |
+| --- | --- | --- |
+| **Hourly Spin** | Return every hour, spin the animated wheel, and reveal a provably fair prize. | Prize value |
+| **Red or Black** | Make the call, reveal the card, and see instantly whether the prediction landed. | 25 points for a win |
+| **Memory Rush** | Memorize the sequence, enter it under pressure, and chase a perfect run. | Up to 1,000 points |
 
-The repository-owned Jinja, Alpine.js, JavaScript, CSS, and SVG frontend has no
-Node build step or CDN dependency. Its compact lobby puts the catalogue first with
-full-card play links and cadence badges for Hourly Spin, Red or Black, and Memory
-Rush. Create or select a local demo identity from the header, then play each real
-server flow:
+Every game includes:
 
-- Hourly Spin (`daily_spin` in the API) publishes a commitment, retains one
-  browser-generated client seed for exact recovery, and keeps the returned result
-  hidden until the result-directed wheel animation finishes. Reduced-motion players
-  see the wheel land and the result immediately. Only then does the browser submit
-  the configured reward value as its score, retrieve and verify the full reveal
-  evidence, and offer the recorded reward for collection.
-- Red or Black (`prediction_card` in the API) submits only a labelled red or black
-  choice and reveals the card returned by the server. Retrying the same session and
-  choice returns that recorded outcome, while changing the choice is rejected.
-  Incorrect predictions explicitly show a zero-point reward. Its score is submitted
-  after the card reveal.
-- Memory Rush (`skill_check` in the API) previews the server-generated unique-digit
-  sequence, accepts keyboard or touch input, and submits those actions for the
-  authoritative correct-prefix score. It then submits that returned score
-  idempotently and claims the matching reward.
-- Every game page embeds its live UTC-week leaderboard beside the game on wide
-  screens and directly below it on narrow screens. Each panel shows the top 10,
-  the current player's best rank, and a reset countdown without pagination.
-  Rank changes use short, optional motion plus a polite text announcement;
-  generated `Player-…` labels keep player-entered display names and player UUIDs
-  out of leaderboard entries.
+- A live top-10 leaderboard and the current player's personal best rank.
+- Animated rank changes when another player moves ahead.
+- A weekly reset countdown that keeps the competition fresh.
+- Responsive layouts with the leaderboard beside the game on desktop and below
+  it on smaller screens.
+- Motion-reduced alternatives and accessible status announcements.
 
-Browser timers and animations are presentation only. Server timestamps enforce
-expiry and cooldown, and browser refresh recovery reads durable state from PostgreSQL.
-The browser operation journal retains request, session, commitment, seed, outcome,
-and pending-action identifiers; uncertain mutations are never automatically replaced
-with a new intent. Local player IDs remain a demonstration boundary, not authentication.
+## Built for competition
 
-## Quick start
+The leaderboard is part of the game loop, not a reporting screen. New scores
+trigger privacy-safe live updates, clients refetch authoritative rankings, and
+brief motion draws attention to meaningful position changes. If the live signal
+is interrupted, periodic refresh and reconnect recovery bring the board back in
+sync.
 
-Only Docker and Docker Compose are required on the host.
+Public `Player-…` labels protect player-entered names and identifiers. Rankings
+remain reproducible from PostgreSQL, while Redis acts only as a fast, disposable
+projection. Weekly settlement uses each player's best eligible result, with
+deterministic tie-breaking and a durable link to the score that earned the rank.
+
+## Product energy, engineering discipline
+
+The frontend is deliberately lightweight—server-rendered Jinja, Alpine.js,
+JavaScript, CSS, and SVG, with no Node build pipeline or CDN dependency. Behind
+it sits a compact architecture shaped around the failure modes that matter in
+real game systems:
+
+- **Server authority:** the browser expresses intent; the server owns outcomes,
+  scores, rewards, cooldowns, timestamps, and session state.
+- **Provably fair play:** Hourly Spin uses an HMAC-SHA256 commitment/reveal flow
+  with independently verifiable evidence.
+- **Safe retries:** play, score submission, reward collection, and settlement are
+  idempotent and enforced at the database boundary.
+- **Reproducible history:** published game configurations are immutable, and
+  every outcome retains the exact version that produced it.
+- **Durable recovery:** PostgreSQL is the source of truth; browser refreshes and
+  Redis loss do not erase completed play.
+- **Auditable behavior:** append-only evidence records the lifecycle of outcomes,
+  rewards, and fairness proofs.
+- **Concurrency-aware settlement:** database constraints and explicit
+  transactions prevent duplicate rewards and conflicting advancement.
+
+The result is intentionally more than a polished UI demo. It shows how product
+engagement, fairness, reliability, privacy, and operational simplicity can be
+designed as one system.
+
+## Architecture at a glance
+
+```text
+Browser UI  ->  FastAPI routes  ->  Services  ->  PostgreSQL
+                                      |
+                                      +------->  Redis leaderboard cache
+```
+
+API handlers validate and translate requests. Services own game rules and
+transaction boundaries. Repositories own persistence. Redis can accelerate a
+leaderboard read, but it can never become the authority for a score, reward, or
+settlement.
+
+## Run it
+
+Docker and Docker Compose are the only host requirements.
 
 ```console
 docker compose up --build -d
 docker compose run --rm app python -m tools.seed
-docker compose ps
 ```
 
-Open the player lobby at `http://127.0.0.1:8000/`. The JSON API is under `/api/v1`,
-and interactive OpenAPI documentation is at `/docs`. Copy `.env.example` to an
-ignored `.env` only when local values need changing—never commit secrets.
+Open `http://127.0.0.1:8000/` to play. The API is available under `/api/v1`, with
+interactive documentation at `/docs`.
 
-## Common commands
+## Technology
 
-Ordinary development commands use `compose.yaml` and never create or wait for
-the test database:
+Python 3.14 · FastAPI · SQLAlchemy 2.0 · PostgreSQL · Redis · Alembic · Pydantic
+v2 · Jinja · Alpine.js · pytest · Ruff · mypy · Docker Compose
 
-```console
-docker compose run --rm app alembic check
-docker compose run --rm app python -m tools.simulate daily_spin --runs 100000
-```
-
-Quality checks use the explicit test overlay. Starting this stack waits for the
-separate `db_test` database and supplies its isolated URL to both project commands
-and the test suite, so Alembic and quality checks cannot target development data:
-
-```console
-docker compose -f compose.yaml -f compose.test.yaml up --build -d --wait
-docker compose -f compose.yaml -f compose.test.yaml run --rm app ruff format --check .
-docker compose -f compose.yaml -f compose.test.yaml run --rm app ruff check .
-docker compose -f compose.yaml -f compose.test.yaml run --rm app mypy app tests tools
-docker compose -f compose.yaml -f compose.test.yaml run --rm app pytest
-```
-
-Pytest migrates and clears only `db_test`; development migrations remain an
-explicit `docker compose run --rm app alembic upgrade head`. The suite measures
-branch coverage across `app` and `tools` and fails below 80%. Stop development
-with `docker compose down`. Stop the test stack with
-`docker compose -f compose.yaml -f compose.test.yaml down`; add `--volumes` only
-when you intentionally want to remove both development and test container data.
-
-## API at a glance
-
-- `POST /api/v1/players`, sessions, play, claim, rewards, and audit reads.
-- `GET /api/v1/players/{player_id}/game-state?game_key=...` for owner-checked,
-  server-timestamped session, outcome, reward, fairness, score, and cooldown recovery.
-- `POST /api/v1/fairness/commit` and `/fairness/evaluate`; retrieve or verify a proof by outcome.
-- `POST /api/v1/scores`; read leaderboard and authenticated player rank.
-- `GET /api/v1/leaderboards/{game_key}/events?period_start=...` for same-origin
-  `leaderboard-change` invalidations containing only the game and UTC-week coordinates.
-- `POST /api/v1/leaderboards/{game_key}/settle` for an authorized, closed ISO week.
-
-The player-facing leaderboard is score-entry-based, so one generated public label
-may appear more than once. Its UTC period, pagination, and personal best rank use
-the same PostgreSQL-authoritative order whether a validated Redis projection serves
-the read or the request falls back to PostgreSQL. Settlement intentionally ranks
-unique players instead: each player contributes
-only their best eligible score for the closed period. Settlement ranks are contiguous,
-and both best-score selection and ties between players use the canonical order:
-higher score, then earlier completion time, then lower session ID. Every durable
-recipient retains the exact source score that established their rank.
-
-All player-owned operations use the demo `X-Player-ID` boundary. Settlement additionally
-requires `X-Settlement-Token`. These are local demo controls, not production authentication.
-
-Live invalidation uses a bounded in-process broadcaster and is intentionally disposable:
-browsers refetch authorized PostgreSQL-backed state after a signal, on reconnect/focus,
-and every 15 seconds. This matches the current single-process deployment. A future
-multi-worker deployment must fan the same event contract out through PostgreSQL
-`LISTEN/NOTIFY` or Redis Pub/Sub; neither transport would replace PostgreSQL as the
-leaderboard authority.
+The automated suite covers deterministic game rules, API contracts, database
+integration, migrations, retries, and concurrency behavior with an enforced
+branch-coverage threshold.

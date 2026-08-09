@@ -116,9 +116,12 @@ async def test_submit_retry_read_and_rank_for_every_game(game_key: str) -> None:
 
         assert board.status_code == 200
         assert board.json()["game_key"] == game_key
-        assert board.json()["items"][0]["score_id"] == submitted.json()["id"]
         assert rank.status_code == 200
         assert rank.json()["entry"]["score_id"] == submitted.json()["id"]
+        board_entry = next(
+            item for item in board.json()["items"] if item["score_id"] == submitted.json()["id"]
+        )
+        assert board_entry == rank.json()["entry"]
     finally:
         await database.dispose()
 
