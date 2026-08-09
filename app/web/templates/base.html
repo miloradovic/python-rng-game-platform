@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <meta name="theme-color" content="#07111f">
-    <meta name="description" content="A server-authoritative, free-to-play game platform demonstration.">
+    <meta name="description" content="Quick free-play games with point rewards and live weekly leaderboards.">
     <title>{% block title %}Arcade Proof{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
     <script defer src="{{ url_for('static', path='/js/core/state.js') }}"></script>
@@ -55,15 +55,15 @@
           aria-label="Primary navigation"
           x-bind:class="navClass"
         >
-          <a href="{{ url_for('lobby') }}"{% if page == 'lobby' %} aria-current="page"{% endif %}>Lobby</a>
-          <a href="{{ url_for('leaderboard_page') }}"{% if page == 'leaderboard' %} aria-current="page"{% endif %}>Leaderboard</a>
-          <span class="demo-boundary">Local demo</span>
+          <a href="{{ url_for('lobby') }}#games"{% if page == 'lobby' %} aria-current="page"{% endif %}>Games</a>
+          <span class="demo-boundary">Free play</span>
         </nav>
         <div class="header-actions">
           <button class="icon-button" id="preferences-button" type="button" x-on:click="openPreferences" aria-label="Motion and sound settings" aria-haspopup="dialog">
             <span aria-hidden="true">⚙</span>
           </button>
           <button class="player-chip" id="player-menu-button" type="button" x-on:click="openIdentity" aria-haspopup="dialog">
+            <span class="sr-only">Player selector:</span>
             <span class="player-chip-dot" aria-hidden="true"></span>
             <span x-text="playerLabel">Choose player</span>
           </button>
@@ -83,8 +83,7 @@
 
     <footer class="site-footer">
       <div class="shell footer-inner">
-        <p>Free-to-play portfolio demo. No payments, cash value, or wagering.</p>
-        <p>Results and rewards come from the server.</p>
+        <p>Free to play. Points have no cash value. No purchases or betting.</p>
       </div>
     </footer>
   </body>

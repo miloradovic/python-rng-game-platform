@@ -60,12 +60,28 @@ class GameCard:
     description: str
     accent: str
     eyebrow: str
+    cadence: str
 
 
-_GAME_PRESENTATION: dict[str, tuple[str, str]] = {
-    "daily_spin": ("spin", "Commit. Spin. Verify."),
-    "prediction_card": ("prediction", "Choose red or black."),
-    "skill_check": ("skill", "Remember the sequence."),
+_GAME_PRESENTATION: dict[str, tuple[str, str, str, str]] = {
+    "daily_spin": (
+        "Hourly Spin",
+        "Spin for a shot at the top point prize.",
+        "spin",
+        "Every hour",
+    ),
+    "prediction_card": (
+        "Red or Black",
+        "Pick a color. Call it right and score.",
+        "prediction",
+        "Every minute",
+    ),
+    "skill_check": (
+        "Memory Rush",
+        "Watch the numbers. Repeat the run. Beat the board.",
+        "skill",
+        "Every 30 seconds",
+    ),
 }
 
 
@@ -79,13 +95,17 @@ def validate_web_assets(root: Path = WEB_ROOT) -> None:
 
 
 def _game_card(game: Game) -> GameCard:
-    accent, eyebrow = _GAME_PRESENTATION.get(game.key, ("default", "Server-authoritative play."))
+    name, description, accent, cadence = _GAME_PRESENTATION.get(
+        game.key,
+        (game.name, game.description, "default", "Play anytime"),
+    )
     return GameCard(
         key=game.key,
-        name=game.name,
-        description=game.description,
+        name=name,
+        description=description,
         accent=accent,
-        eyebrow=eyebrow,
+        eyebrow=cadence,
+        cadence=cadence,
     )
 
 

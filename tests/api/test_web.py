@@ -80,8 +80,33 @@ async def test_lobby_renders_catalogue_with_strict_browser_headers(application: 
     assert "script-src 'self'" in response.headers["content-security-policy"]
     assert "unsafe-inline" not in response.headers["content-security-policy"]
     assert "unsafe-eval" not in response.headers["content-security-policy"]
-    assert "Daily &lt;Spin&gt;" in response.text
+    assert "Hourly Spin" in response.text
+    assert "Red or Black" in response.text
+    assert "Memory Rush" in response.text
+    assert "Daily &lt;Spin&gt;" not in response.text
+    assert "A weighted reward spin." not in response.text
     assert "Not player-visible" not in response.text
+    assert "Pick a game. <em>Chase the top spot.</em>" in response.text
+    assert "Quick rounds, point rewards, and live weekly leaderboards." in response.text
+    assert response.text.count('class="game-card-link"') == 3
+    assert response.text.count("Play now") == 4
+    assert "Every hour" in response.text
+    assert "Every minute" in response.text
+    assert "Every 30 seconds" in response.text
+    assert "Spin for a shot at the top point prize." in response.text
+    assert "Pick a color. Call it right and score." in response.text
+    assert "Watch the numbers. Repeat the run. Beat the board." in response.text
+    assert "Fair results" in response.text
+    assert "Progress saved" in response.text
+    assert "Free play only" in response.text
+    assert "Built for proof" not in response.text
+    assert "What makes it trustworthy" not in response.text
+    assert ">Games</a>" in response.text
+    assert ">Leaderboard</a>" not in response.text
+    assert '<span class="demo-boundary">Free play</span>' in response.text
+    assert '<span class="sr-only">Player selector:</span>' in response.text
+    assert "Free to play. Points have no cash value. No purchases or betting." in response.text
+    assert "server-authoritative, free-to-play" not in response.text
     assert "https://" not in response.text
     assert "alpine-csp-3.15.12.min.js" in response.text
     assert "sha384-MKLWq9B+" in response.text

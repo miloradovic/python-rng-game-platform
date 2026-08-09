@@ -25,20 +25,25 @@ points for a correct prediction (otherwise zero), and the Skill Check score from
 ## Player frontend
 
 The repository-owned Jinja, Alpine.js, JavaScript, CSS, and SVG frontend has no
-Node build step or CDN dependency. Create or select a local demo identity from the
-header, then use the lobby to play each real server flow:
+Node build step or CDN dependency. Its compact lobby puts the catalogue first with
+full-card play links and cadence badges for Hourly Spin, Red or Black, and Memory
+Rush. Create or select a local demo identity from the header, then play each real
+server flow:
 
-- Daily Spin publishes a commitment, retains one browser-generated client seed for
-  exact recovery, animates only after the authoritative result, retrieves the full
-  reveal evidence, submits the configured reward value as its score after the wheel
-  finishes, asks the server to verify it, and claims the recorded reward.
-- Prediction Card submits only a labelled red or black choice and reveals the card
-  returned by the server. Retrying the same session and choice returns that recorded
-  outcome, while changing the choice is rejected. Incorrect predictions explicitly
-  show a zero-point reward. Its score is submitted after the card reveal.
-- Skill Check previews the server-generated unique-digit sequence, accepts keyboard
-  or touch input, and submits those actions for the authoritative correct-prefix score.
-  It then submits that returned score idempotently and claims the matching reward.
+- Hourly Spin (`daily_spin` in the API) publishes a commitment, retains one
+  browser-generated client seed for exact recovery, animates only after the
+  authoritative result, retrieves the full reveal evidence, submits the configured
+  reward value as its score after the wheel finishes, asks the server to verify it,
+  and claims the recorded reward.
+- Red or Black (`prediction_card` in the API) submits only a labelled red or black
+  choice and reveals the card returned by the server. Retrying the same session and
+  choice returns that recorded outcome, while changing the choice is rejected.
+  Incorrect predictions explicitly show a zero-point reward. Its score is submitted
+  after the card reveal.
+- Memory Rush (`skill_check` in the API) previews the server-generated unique-digit
+  sequence, accepts keyboard or touch input, and submits those actions for the
+  authoritative correct-prefix score. It then submits that returned score
+  idempotently and claims the matching reward.
 - Every game page embeds its live UTC-week leaderboard beside the game on wide
   screens and directly below it on narrow screens. Each panel shows the top 10,
   the current player's best rank, and a reset countdown without pagination.
