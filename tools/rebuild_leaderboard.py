@@ -24,6 +24,7 @@ from app.cache import (
 )
 from app.config import get_settings
 from app.database import Database
+from app.game_rules import InvalidRulesInputError, leaderboard_rules_for
 from app.logging import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,10 @@ async def rebuild_leaderboard(
     resolved_integrity = integrity or projection_integrity(get_settings())
     if resolved_integrity is None:
         raise RuntimeError("leaderboard projection integrity is not configured")
+    try:
+        leaderboard_rules_for(game_key)
+    except InvalidRulesInputError as error:
+        raise ValueError("game does not support leaderboards") from error
     game = await repositories.get_game(session, game_key)
     if game is None:
         raise ValueError("unknown game")

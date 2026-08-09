@@ -133,6 +133,7 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
         "games/prediction-card.js",
         "games/skill-check.js",
         "core/preferences.js",
+        "core/final-score.js",
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application), base_url="http://test"
@@ -140,6 +141,7 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
         stylesheet = await client.get("/static/css/app.css")
         alpine = await client.get("/static/vendor/alpine-csp-3.15.12.min.js")
         scripts = [await client.get(f"/static/js/{path}") for path in browser_assets]
+        game_page = await client.get("/games/daily_spin")
 
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
@@ -177,6 +179,13 @@ async def test_static_assets_are_local_and_cache_deliberately(application: Any) 
     assert "arcade-proof.preferences.v1" in scripts[10].text
     assert "sound: false" in scripts[10].text
     assert "prefers-reduced-motion" in scripts[10].text
+    assert "submitOrRecover" in scripts[11].text
+    assert "state.session?.final_score" in scripts[11].text
+    assert game_page.text.index("core/final-score.js") < game_page.text.index("games/daily-spin.js")
+    daily_animation = scripts[7].text.index("await this.animateResult()")
+    assert daily_animation < scripts[7].text.index("finalScores.submitOrRecover", daily_animation)
+    card_reveal = scripts[8].text.index("this.presentResult(true)")
+    assert card_reveal < scripts[8].text.index("finalScores.submitOrRecover", card_reveal)
 
 
 async def test_accessibility_preferences_and_api_cache_isolation(application: Any) -> None:

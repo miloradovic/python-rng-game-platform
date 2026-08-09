@@ -52,6 +52,7 @@
       session: null,
       outcome: null,
       reward: null,
+      finalScore: null,
       proof: null,
       verification: null,
       segments: [],
@@ -145,6 +146,7 @@
         this.session = state.session;
         this.outcome = state.session?.outcome || null;
         this.reward = state.session?.reward || null;
+        this.finalScore = state.session?.final_score || null;
         const countdownTarget = this.session?.status === "active"
           ? this.session.expires_at
           : state.next_play_at;
@@ -174,6 +176,9 @@
         }
         if (this.outcome) {
           this.presentResult(false);
+          if (!this.finalScore) {
+            await window.ArcadeProof.finalScores.submitOrRecover(this, gameKey, state);
+          }
           await this.loadProof();
           this.status = state.next_play_at ? "cooldown" : "result";
           this.message = "The authoritative result was recovered from the server.";
@@ -206,6 +211,7 @@
           if (!this.session || this.session.status !== "active") {
             this.outcome = null;
             this.reward = null;
+            this.finalScore = null;
             this.proof = null;
             this.verification = null;
             this.resultLabel = "";
@@ -229,8 +235,9 @@
           const evaluated = await window.ArcadeProof.api.evaluateFairness(this.player.id, proofId, seed);
           this.outcome = evaluated.outcome;
           this.reward = evaluated.reward;
-          this.saveJournal({ outcome: this.outcome, pendingAction: "verify" });
+          this.saveJournal({ outcome: this.outcome, pendingAction: "submit_score" });
           await this.animateResult();
+          await window.ArcadeProof.finalScores.submitOrRecover(this, gameKey);
           await this.loadProof();
           this.status = "result";
           this.message = this.isVerified

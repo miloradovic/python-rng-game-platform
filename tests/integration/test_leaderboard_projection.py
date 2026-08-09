@@ -133,11 +133,11 @@ async def test_score_submission_is_server_derived_and_evidenced() -> None:
         game_session, outcome = await _completed_skill_session(database, player_id)
 
         async with database.session_factory() as session:
-            score, created = await services.submit_final_score(
+            score, created, game_key = await services.submit_final_score(
                 session, session_id=game_session.id, owner_id=player_id
             )
         async with database.session_factory() as session:
-            retried, retry_created = await services.submit_final_score(
+            retried, retry_created, retry_game_key = await services.submit_final_score(
                 session, session_id=game_session.id, owner_id=player_id
             )
             audit_count = await session.scalar(
@@ -162,6 +162,7 @@ async def test_score_submission_is_server_derived_and_evidenced() -> None:
 
         assert created is True
         assert retry_created is False
+        assert game_key == retry_game_key == "skill_check"
         assert retried.id == score.id
         assert score.final_score == outcome.result["score"]
         assert score.completed_at == game_session.ended_at
@@ -182,7 +183,7 @@ async def test_concurrent_score_retry_creates_one_row() -> None:
             session.add(Player(id=player_id, display_name="Concurrent Score"))
         game_session, _ = await _completed_skill_session(database, player_id)
 
-        async def submit() -> tuple[FinalScore, bool]:
+        async def submit() -> tuple[FinalScore, bool, str]:
             async with database.session_factory() as session:
                 return await services.submit_final_score(
                     session, session_id=game_session.id, owner_id=player_id
@@ -213,7 +214,7 @@ async def test_rebuild_matches_postgresql_and_is_repeatable() -> None:
             session.add(Player(id=player_id, display_name="Rebuild Score"))
         game_session, _ = await _completed_skill_session(database, player_id)
         async with database.session_factory() as session:
-            score, _ = await services.submit_final_score(
+            score, _, _ = await services.submit_final_score(
                 session, session_id=game_session.id, owner_id=player_id
             )
             game = await repositories.get_game(session, "skill_check")
@@ -454,7 +455,7 @@ async def test_projection_page_boundaries_match_postgresql() -> None:
         for player_id in player_ids:
             game_session, _ = await _completed_skill_session(database, player_id)
             async with database.session_factory() as session:
-                score, _ = await services.submit_final_score(
+                score, _, _ = await services.submit_final_score(
                     session, session_id=game_session.id, owner_id=player_id
                 )
                 score_period = score.period_start

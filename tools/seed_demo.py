@@ -167,7 +167,7 @@ async def seed_demo_data(
             sessions_completed += 1
 
         async with database.session_factory() as session:
-            score, created = await services.submit_final_score(
+            score, created, _ = await services.submit_final_score(
                 session,
                 session_id=game_session.id,
                 owner_id=player_id,

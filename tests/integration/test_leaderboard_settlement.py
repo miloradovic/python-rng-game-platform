@@ -419,7 +419,7 @@ async def test_rebuild_removes_corruption_and_preserves_projection_isolation() -
             session.add(Player(id=player_id, display_name="Corrupt Projection"))
         game_session, _ = await _completed_skill_session(database, player_id)
         async with database.session_factory() as session:
-            score, _ = await services.submit_final_score(
+            score, _, _ = await services.submit_final_score(
                 session, session_id=game_session.id, owner_id=player_id
             )
             period_key = score.period_start.strftime("%Y%m%dT%H%M%SZ")

@@ -12,6 +12,7 @@
       session: null,
       outcome: null,
       reward: null,
+      finalScore: null,
       pendingChoice: null,
       choices: [],
       cardClass: "prediction-card",
@@ -71,6 +72,7 @@
         this.session = state.session;
         this.outcome = state.session?.outcome || null;
         this.reward = state.session?.reward || null;
+        this.finalScore = state.session?.final_score || null;
         const saved = window.ArcadeProof.journal.get(this.player.id, gameKey) || {};
         this.pendingChoice = (!this.session || this.session.status === "active")
           && ["create_session", "play"].includes(saved.pendingAction)
@@ -105,6 +107,9 @@
           this.presentResult(false);
           this.status = state.next_play_at ? "cooldown" : "result";
           this.message = "The authoritative card result was recovered.";
+          if (!this.finalScore) {
+            await window.ArcadeProof.finalScores.submitOrRecover(this, gameKey, state);
+          }
         }
       },
       startCountdown(serverTime, target) {
@@ -154,6 +159,7 @@
           if (!this.session || this.session.status !== "active") {
             this.outcome = null;
             this.reward = null;
+            this.finalScore = null;
             this.cardClass = "prediction-card";
             this.cardSymbol = "?";
             this.resultLabel = "";
@@ -171,7 +177,7 @@
             this.session.id,
             { choice },
           );
-          this.saveJournal({ outcome: this.outcome, pendingAction: "claim" });
+          this.saveJournal({ outcome: this.outcome, pendingAction: "submit_score" });
           this.pendingChoice = null;
           this.status = "animating";
           const duration = this.presentResult(true);
@@ -185,6 +191,7 @@
             0,
           );
           await this.recoverReward();
+          await window.ArcadeProof.finalScores.submitOrRecover(this, gameKey);
         } catch (error) {
           this.status = error.code === "session_expired" ? "expired" : "recovering";
           this.message = error.message;

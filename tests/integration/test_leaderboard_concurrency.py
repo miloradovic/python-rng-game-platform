@@ -164,7 +164,7 @@ async def test_concurrent_rebuild_score_commit_and_read_preserve_canonical_resul
         first_session, _ = await _completed_skill_session(database, first_player)
         second_session, _ = await _completed_skill_session(database, second_player)
         async with database.session_factory() as session:
-            first_score, _ = await services.submit_final_score(
+            first_score, _, _ = await services.submit_final_score(
                 session, session_id=first_session.id, owner_id=first_player
             )
             await rebuild_leaderboard(

@@ -82,6 +82,7 @@ class DirectGameEntry:
     definition: GameDefinition
     direct_play: DirectPlayEvaluation
     leaderboard: LeaderboardScoreExtraction | None = None
+    settlement: bool = False
     mode: Literal["direct"] = "direct"
 
 
@@ -91,6 +92,8 @@ class FairnessGameEntry:
 
     definition: GameDefinition
     fairness: FairnessConfiguration
+    leaderboard: LeaderboardScoreExtraction | None = None
+    settlement: bool = False
     mode: Literal["fairness"] = "fairness"
 
 
@@ -120,6 +123,11 @@ class DailySpinRules:
         if not isinstance(payload, DailySpinConfig):
             raise InvalidRulesInputError("configuration does not match daily spin")
         return tuple(RewardBand(band.key, band.weight, band.value) for band in payload.rewards)
+
+    def leaderboard_score(self, config: GameConfigVersion, outcome: Outcome) -> int:
+        """Use the immutable configured point value selected by the spin outcome."""
+
+        return self.reward_value(config, outcome)
 
 
 @dataclass(frozen=True)
@@ -170,6 +178,11 @@ class PredictionCardRules:
         if not isinstance(payload, PredictionCardConfig):
             raise InvalidRulesInputError("configuration does not match prediction card")
         return payload.correct_reward if outcome.result.get("correct") is True else 0
+
+    def leaderboard_score(self, config: GameConfigVersion, outcome: Outcome) -> int:
+        """Score a correct prediction with its configured reward, otherwise zero."""
+
+        return self.reward_value(config, outcome)
 
 
 @dataclass(frozen=True)
@@ -243,15 +256,18 @@ _RULES: dict[GameKey, RegisteredGame] = {
     GameKey.DAILY_SPIN: FairnessGameEntry(
         definition=_DAILY_SPIN_RULES,
         fairness=_DAILY_SPIN_RULES,
+        leaderboard=_DAILY_SPIN_RULES,
     ),
     GameKey.PREDICTION_CARD: DirectGameEntry(
         definition=_PREDICTION_CARD_RULES,
         direct_play=_PREDICTION_CARD_RULES,
+        leaderboard=_PREDICTION_CARD_RULES,
     ),
     GameKey.SKILL_CHECK: DirectGameEntry(
         definition=_SKILL_CHECK_RULES,
         direct_play=_SKILL_CHECK_RULES,
         leaderboard=_SKILL_CHECK_RULES,
+        settlement=True,
     ),
 }
 
@@ -278,8 +294,17 @@ def leaderboard_rules_for(game_key: str) -> LeaderboardScoreExtraction:
     """Resolve score extraction and reject games without that capability."""
 
     registered_game = rules_for(game_key)
-    if registered_game.mode != "direct" or registered_game.leaderboard is None:
+    if registered_game.leaderboard is None:
         raise InvalidRulesInputError("game does not support leaderboards")
+    return registered_game.leaderboard
+
+
+def settlement_rules_for(game_key: str) -> LeaderboardScoreExtraction:
+    """Resolve the leaderboard capability only when settlement is configured."""
+
+    registered_game = rules_for(game_key)
+    if not registered_game.settlement or registered_game.leaderboard is None:
+        raise InvalidRulesInputError("game does not support settlement")
     return registered_game.leaderboard
 
 

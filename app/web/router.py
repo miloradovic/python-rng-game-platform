@@ -32,6 +32,7 @@ REQUIRED_WEB_ASSETS = (
     Path("static/js/core/api-client.js"),
     Path("static/js/core/clock.js"),
     Path("static/js/core/operation-journal.js"),
+    Path("static/js/core/final-score.js"),
     Path("static/js/core/player-store.js"),
     Path("static/js/core/preferences.js"),
     Path("static/js/core/state.js"),

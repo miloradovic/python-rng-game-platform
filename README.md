@@ -16,8 +16,10 @@ It has no payments, cash value, wagering, KYC, or claim of regulatory compliance
 - PostgreSQL as the durable authority; Redis only as a rebuildable leaderboard projection.
 - Idempotent reward claims, score submissions, and unique-player closed-period settlement.
 
-The seeded games are `daily_spin`, `prediction_card`, and `skill_check`. Only the
-server-derived `skill_check` result is eligible for the leaderboard.
+The seeded games are `daily_spin`, `prediction_card`, and `skill_check`. All three
+produce server-derived leaderboard scores: the configured spin reward value, 25
+points for a correct prediction (otherwise zero), and the Skill Check score from
+0 to 1,000.
 
 ## Player frontend
 
@@ -27,11 +29,12 @@ header, then use the lobby to play each real server flow:
 
 - Daily Spin publishes a commitment, retains one browser-generated client seed for
   exact recovery, animates only after the authoritative result, retrieves the full
-  reveal evidence, asks the server to verify it, and claims the recorded reward.
+  reveal evidence, submits the configured reward value as its score after the wheel
+  finishes, asks the server to verify it, and claims the recorded reward.
 - Prediction Card submits only a labelled red or black choice and reveals the card
   returned by the server. Retrying the same session and choice returns that recorded
   outcome, while changing the choice is rejected. Incorrect predictions explicitly
-  show a zero-point reward.
+  show a zero-point reward. Its score is submitted after the card reveal.
 - Skill Check previews the server-generated unique-digit sequence, accepts keyboard
   or touch input, and submits those actions for the authoritative correct-prefix score.
   It then submits that returned score idempotently and claims the matching reward.
@@ -95,7 +98,7 @@ when you intentionally want to remove both development and test container data.
   server-timestamped session, outcome, reward, fairness, score, and cooldown recovery.
 - `POST /api/v1/fairness/commit` and `/fairness/evaluate`; retrieve or verify a proof by outcome.
 - `POST /api/v1/scores`; read leaderboard and authenticated player rank.
-- `POST /api/v1/leaderboards/skill_check/settle` for an authorized, closed ISO week.
+- `POST /api/v1/leaderboards/{game_key}/settle` for an authorized, closed ISO week.
 
 The player-facing leaderboard is score-entry-based, so one generated public label
 may appear more than once. Its UTC period, pagination, and personal best rank use

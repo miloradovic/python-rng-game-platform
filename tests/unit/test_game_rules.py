@@ -18,6 +18,7 @@ from app.game_rules import (
     leaderboard_rules_for,
     registered_game_keys,
     rules_for,
+    settlement_rules_for,
 )
 from app.models import GameConfigVersion, GameSession, Outcome
 from app.rng import HmacOutcomeProvider, daily_spin_mapping_digest
@@ -51,21 +52,24 @@ def test_registry_exposes_only_supported_typed_capabilities() -> None:
     assert daily_spin.mode == "fairness"
     assert isinstance(daily_spin.definition, DailySpinRules)
     assert isinstance(daily_spin.fairness, DailySpinRules)
+    assert isinstance(daily_spin.leaderboard, DailySpinRules)
+    assert daily_spin.settlement is False
     assert not hasattr(daily_spin.definition, "evaluate")
     assert not hasattr(daily_spin, "direct_play")
-    assert not hasattr(daily_spin, "leaderboard")
 
     assert isinstance(prediction_card, DirectGameEntry)
     assert prediction_card.mode == "direct"
     assert isinstance(prediction_card.definition, PredictionCardRules)
     assert isinstance(prediction_card.direct_play, PredictionCardRules)
-    assert prediction_card.leaderboard is None
+    assert isinstance(prediction_card.leaderboard, PredictionCardRules)
+    assert prediction_card.settlement is False
 
     assert isinstance(skill_check, DirectGameEntry)
     assert skill_check.mode == "direct"
     assert isinstance(skill_check.definition, SkillCheckRules)
     assert isinstance(skill_check.direct_play, SkillCheckRules)
     assert isinstance(skill_check.leaderboard, SkillCheckRules)
+    assert skill_check.settlement is True
 
 
 def test_registry_is_complete_for_every_defined_game_key() -> None:
@@ -79,15 +83,22 @@ def test_registry_fails_closed_for_unknown_game() -> None:
         rules_for("unknown")
 
 
-@pytest.mark.parametrize("game_key", [GameKey.DAILY_SPIN, GameKey.PREDICTION_CARD])
-def test_leaderboard_capability_rejects_ineligible_games(game_key: GameKey) -> None:
-    with pytest.raises(InvalidRulesInputError):
-        leaderboard_rules_for(game_key)
+@pytest.mark.parametrize("game_key", list(GameKey))
+def test_every_registered_game_exposes_leaderboard_capability(game_key: GameKey) -> None:
+    assert leaderboard_rules_for(game_key) is rules_for(game_key).leaderboard
 
 
 def test_fairness_capability_rejects_direct_play_game() -> None:
     with pytest.raises(InvalidRulesInputError):
         fairness_rules_for(GameKey.PREDICTION_CARD)
+
+
+@pytest.mark.parametrize("game_key", [GameKey.DAILY_SPIN, GameKey.PREDICTION_CARD])
+def test_settlement_capability_preserves_skill_check_only_policy(game_key: GameKey) -> None:
+    with pytest.raises(InvalidRulesInputError):
+        settlement_rules_for(game_key)
+
+    assert settlement_rules_for(GameKey.SKILL_CHECK) is leaderboard_rules_for(GameKey.SKILL_CHECK)
 
 
 def test_prediction_rules_are_deterministic() -> None:
@@ -116,6 +127,27 @@ def test_prediction_rules_are_deterministic() -> None:
     assert first == second
     outcome = Outcome(session_id=game_session.id, config_version_id=config.id, result=first)
     assert entry.definition.reward_value(config, outcome) in (0, 25)
+
+
+@pytest.mark.parametrize(
+    ("correct", "expected"),
+    [(True, 25), (False, 0)],
+)
+def test_prediction_leaderboard_score_uses_configured_reward(correct: bool, expected: int) -> None:
+    config = _config(
+        {
+            "game_type": "prediction_card",
+            "cooldown_seconds": 60,
+            "choices": ["red", "black"],
+            "correct_reward": 25,
+        }
+    )
+    outcome = Outcome(session_id=uuid4(), config_version_id=config.id, result={"correct": correct})
+
+    assert (
+        leaderboard_rules_for(GameKey.PREDICTION_CARD).leaderboard_score(config, outcome)
+        == expected
+    )
 
 
 def test_skill_rules_derive_score_without_infrastructure() -> None:
@@ -181,6 +213,28 @@ def test_daily_spin_exposes_real_fairness_configuration_without_direct_play() ->
         ("a", 1, 1),
         ("b", 2, 2),
     ]
+
+    outcome = Outcome(session_id=uuid4(), config_version_id=config.id, result={"reward_key": "b"})
+    assert leaderboard_rules_for(GameKey.DAILY_SPIN).leaderboard_score(config, outcome) == 2
+
+
+def test_daily_spin_leaderboard_score_rejects_unknown_reward_key() -> None:
+    config = _config(
+        {
+            "game_type": "daily_spin",
+            "cooldown_seconds": 3600,
+            "rewards": [
+                {"key": "coins_10", "weight": 1, "value": 10},
+                {"key": "coins_50", "weight": 1, "value": 50},
+            ],
+        }
+    )
+    outcome = Outcome(
+        session_id=uuid4(), config_version_id=config.id, result={"reward_key": "unknown"}
+    )
+
+    with pytest.raises(InvalidRulesInputError):
+        leaderboard_rules_for(GameKey.DAILY_SPIN).leaderboard_score(config, outcome)
 
 
 def test_seeded_fairness_reward_bands_preserve_mapping_fixed_vector() -> None:

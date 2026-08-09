@@ -17,7 +17,6 @@ from app.api.dependencies import (
 )
 from app.cache import project_final_score
 from app.database import get_session as get_database_session
-from app.game_rules import GameKey
 from app.leaderboard_projection import LeaderboardProjectionReader
 from app.observability import MetricsRegistry
 from app.schemas import (
@@ -89,7 +88,16 @@ async def settle_leaderboard(
     )
 
 
-@router.post("/scores", response_model=FinalScoreResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/scores",
+    response_model=FinalScoreResponse,
+    status_code=status.HTTP_201_CREATED,
+    description=(
+        "Create the completed session's server-derived score for any supported game. "
+        "The client supplies only the session ID; the pinned immutable configuration "
+        "and accepted outcome determine the value. A retry returns the same score."
+    ),
+)
 async def submit_score(
     body: FinalScoreCreate,
     session: Session,
@@ -97,13 +105,13 @@ async def submit_score(
     response: Response,
     owner_id: OwnerId,
 ) -> FinalScoreResponse:
-    score, created = await leaderboard_services.submit_final_score(
+    score, created, game_key = await leaderboard_services.submit_final_score(
         session, session_id=body.session_id, owner_id=owner_id
     )
     if not created:
         response.status_code = status.HTTP_200_OK
     else:
-        await project_final_score(redis, score, GameKey.SKILL_CHECK.value)
+        await project_final_score(redis, score, game_key)
     return FinalScoreResponse.model_validate(score)
 
 

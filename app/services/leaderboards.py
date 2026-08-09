@@ -7,7 +7,12 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories
-from app.game_rules import InvalidRulesInputError, LeaderboardScoreExtraction, leaderboard_rules_for
+from app.game_rules import (
+    InvalidRulesInputError,
+    LeaderboardScoreExtraction,
+    leaderboard_rules_for,
+    settlement_rules_for,
+)
 from app.models import (
     AuditRecord,
     FinalScore,
@@ -57,6 +62,17 @@ async def _eligible_leaderboard_game(session: AsyncSession, game_key: str) -> Ga
     return game
 
 
+async def _eligible_settlement_game(session: AsyncSession, game_key: str) -> Game:
+    """Preserve the existing Skill Check-only settlement product boundary."""
+
+    game = await _eligible_leaderboard_game(session, game_key)
+    try:
+        settlement_rules_for(game.key)
+    except InvalidRulesInputError as error:
+        raise LeaderboardGameIneligibleError from error
+    return game
+
+
 def _leaderboard_capability(game_key: str) -> LeaderboardScoreExtraction:
     try:
         return leaderboard_rules_for(game_key)
@@ -70,7 +86,7 @@ async def submit_final_score(
     session_id: uuid.UUID,
     owner_id: uuid.UUID,
     clock: Callable[[], datetime] = utc_now,
-) -> tuple[FinalScore, bool]:
+) -> tuple[FinalScore, bool, str]:
     """Create one server-derived score and its evidence in one durable transaction."""
 
     game_session = await repositories.lock_session(session, session_id)
@@ -80,8 +96,11 @@ async def submit_final_score(
         raise ForbiddenError
     existing = await repositories.get_final_score_by_session(session, session_id)
     if existing is not None:
+        game = await repositories.get_game_by_id(session, game_session.game_id)
+        if game is None:
+            raise NotFoundError
         await session.commit()
-        return existing, False
+        return existing, False, game.key
     player = await repositories.get_player(session, owner_id)
     if player is None:
         raise NotFoundError
@@ -119,7 +138,7 @@ async def submit_final_score(
     await repositories.add_final_score(session, score)
     await repositories.add_final_score_evidence(session, score, game_key=game.key)
     await session.commit()
-    return score, True
+    return score, True, game.key
 
 
 async def canonical_leaderboard(
@@ -228,7 +247,7 @@ async def settle_leaderboard(
         (period_start.hour, period_start.minute, period_start.second, period_start.microsecond)
     ):
         raise InvalidPlayError
-    game = await _eligible_leaderboard_game(session, game_key)
+    game = await _eligible_settlement_game(session, game_key)
     await repositories.lock_game_by_id(session, game.id)
     existing = await repositories.settlement_run(
         session, game_id=game.id, period_start=period_start

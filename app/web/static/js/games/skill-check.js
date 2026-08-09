@@ -240,10 +240,7 @@
         }
       },
       async submitFinalScore() {
-        if (!this.player || !this.session || !this.outcome) return;
-        this.saveJournal({ pendingAction: "submit_score" });
-        this.finalScore = await window.ArcadeProof.api.submitScore(this.player.id, this.session.id);
-        this.saveJournal({ pendingAction: this.canClaim ? "claim" : null });
+        await window.ArcadeProof.finalScores.submitOrRecover(this, gameKey);
       },
       async claim() {
         if (!this.player || !this.session || !this.canClaim) return;
