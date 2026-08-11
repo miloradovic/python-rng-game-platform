@@ -10,6 +10,8 @@ reward.
 This is a free-to-play portfolio project. It has no payments, wagering, cash
 value, KYC, or claim of regulatory compliance.
 
+[Explore the games and player experience](About.md)
+
 ## The player experience
 
 The compact lobby puts games first. Each title has a short replay cadence, a
