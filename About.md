@@ -18,7 +18,7 @@ This is not a mystery-box result: each spin uses a cryptographic
 commitment-and-reveal proof. Open the fairness details after the wheel stops and
 verify the result independently. Clean spin, visible proof, points on the board.
 
-`![Hourly Spin prize wheel, verified result, and live leaderboard](docs/images/about/hourly-spin.jpg)`
+![Hourly Spin prize wheel, verified result, and live leaderboard](docs/images/about/hourly-spin.jpg)
 
 ## Red or Black — make the call
 
@@ -30,7 +30,7 @@ the top 10.
 Your choice is locked before the card comes back, and the recorded result—not
 the browser—decides the score. Call it, flip it, collect it.
 
-`![Red or Black card reveal and live leaderboard](docs/images/about/red-or-black.jpg)`
+![Red or Black card reveal and live leaderboard](docs/images/about/red-or-black.jpg)
 
 ## Memory Rush — hold your nerve
 
@@ -42,7 +42,7 @@ Memory Rush is the skill table: no lucky bounce, just focus, recall, and the
 pressure of knowing the weekly board is watching. Nail the sequence, post the
 score, and dare the lobby to beat it. A new challenge is ready every 30 seconds.
 
-`![Perfect Memory Rush score and live leaderboard](docs/images/about/memory-rush.jpg)`
+![Perfect Memory Rush score and live leaderboard](docs/images/about/memory-rush.jpg)
 
 ## Every round feeds the rivalry
 
